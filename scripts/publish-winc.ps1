@@ -92,8 +92,11 @@ try {
 } finally {
     $env:PEBREL_BUILD_REVISION = $previousRevision
 }
-$builtVersion = Invoke-Native (Join-Path $target 'release\pebrel.exe') @('--version')
-if ($builtVersion -cne "Pebrel $version ($($commit.Substring(0, 12)))") {
+$executable = Join-Path $target 'release\pebrel.exe'
+# A Windows GUI executable only writes to the PowerShell pipeline when its
+# output is redirected. Use the same capture as the installer preflight.
+$builtVersion = (& $executable --version 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $builtVersion -cne "Pebrel $version ($($commit.Substring(0, 12)))") {
     throw "Built executable did not report the release version and commit: $builtVersion"
 }
 if ((Invoke-Git @('rev-parse', 'HEAD')) -cne $commit) {
