@@ -1,3 +1,4 @@
+use super::super::shell_picker::shell_palette_rows;
 use super::*;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 

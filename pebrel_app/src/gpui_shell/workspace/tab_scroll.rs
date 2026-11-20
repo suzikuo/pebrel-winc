@@ -16,7 +16,7 @@ use crate::scrollbar::{self, OverlayScrollbar};
 
 use pebrel_settings::DensityName;
 
-use super::NebulaWorkspace;
+use super::{NebulaWorkspace, tab_groups::SidebarRow};
 
 pub(super) fn tab_row_height(density: DensityName) -> f32 {
     match density {
@@ -36,52 +36,65 @@ pub(super) fn tab_row_gap(density: DensityName) -> f32 {
 /// 旧壳 `tab_right_pad`：给覆盖式滚动条留的恒定沟槽，出现与否都不改行宽。
 pub(super) const TAB_SCROLL_GUTTER: f32 = 9.0;
 
-/// n 行占的高度：间距只在行之间，末行后面不留。
-pub(super) fn rows_h(n: usize, pitch: f32, gap: f32) -> f32 {
-    if n == 0 { 0.0 } else { n as f32 * pitch - gap }
+/// Additional space at the boundary between two sidebar sections.
+const SECTION_GAP: f32 = 6.0;
+
+pub(super) struct SidebarRowLayout {
+    starts: Vec<f32>,
+    height: f32,
+    pitch: f32,
 }
 
-/// 视口里能放下几行。尚未量到高度时先展示全部，避免首帧空列表。
-///
-/// 与旧壳 `chrome_tab_layout` 同一条规则：不够一行就是 0，**绝不**退成
-/// 一行。折叠动画若把裁剪高度写回来，强制 1 行会把整列锁成一行滚动区。
-pub(super) fn visible_count(want: usize, avail_h: f32, pitch: f32, gap: f32) -> usize {
-    if want == 0 {
-        return 0;
+impl SidebarRowLayout {
+    pub(super) fn new(rows: &[SidebarRow], density: DensityName) -> Self {
+        let height = tab_row_height(density);
+        let pitch = height + tab_row_gap(density);
+        let mut offset = 0.0;
+        let starts = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                if index > 0 && matches!(row, SidebarRow::Group(_) | SidebarRow::Ungrouped) {
+                    offset += SECTION_GAP;
+                }
+                let start = offset;
+                offset += pitch;
+                start
+            })
+            .collect();
+        Self { starts, height, pitch }
     }
-    if avail_h <= 1.0 {
-        return want;
+
+    pub(super) fn extra_gap_before(&self, index: usize) -> f32 {
+        self.starts[index] - self.starts[index - 1] - self.pitch
     }
-    let mut show = want;
-    while show > 0 && rows_h(show, pitch, gap) > avail_h + 0.5 {
-        show -= 1;
+
+    fn content_height(&self) -> f32 {
+        self.starts.last().map_or(0.0, |start| start + self.height)
     }
-    show
-}
 
-pub(super) fn max_scroll(want: usize, show: usize) -> usize {
-    want.saturating_sub(show)
-}
-
-pub(super) fn clamp_scroll(scroll: usize, max: usize) -> usize {
-    scroll.min(max)
-}
-
-pub(super) fn index_visible(ix: usize, scroll: usize, show: usize) -> bool {
-    show > 0 && ix >= scroll && ix < scroll + show
-}
-
-/// 激活项滚进窗口：在窗口上方则对齐窗口顶，在下方则对齐窗口底。
-pub(super) fn reveal_index(ix: usize, scroll: usize, show: usize) -> usize {
-    if show == 0 {
-        return 0;
+    fn visible_end(&self, start: usize, avail_h: f32) -> usize {
+        let Some(&top) = self.starts.get(start) else { return start };
+        // The first frame has no measured height yet.
+        if avail_h <= 1.0 {
+            return self.starts.len();
+        }
+        start + self.starts[start..].partition_point(|&y| y + self.height <= top + avail_h + 0.5)
     }
-    if ix < scroll {
-        ix
-    } else if ix >= scroll + show {
-        ix + 1 - show
-    } else {
-        scroll
+
+    fn first_fitting_start(&self, last: usize, avail_h: f32) -> usize {
+        if avail_h <= 1.0 {
+            return 0;
+        }
+        let minimum = self.starts[last] + self.height - avail_h - 0.5;
+        self.starts[..last].partition_point(|&y| y < minimum)
+    }
+
+    pub(super) fn row_at(&self, y: f32, scroll: usize, show: usize) -> Option<usize> {
+        let starts = self.starts.get(scroll..scroll + show)?;
+        let absolute_y = y + starts.first()?;
+        let index = starts.partition_point(|&top| top <= absolute_y).checked_sub(1)?;
+        (absolute_y < starts[index] + self.height).then_some(scroll + index)
     }
 }
 
@@ -121,7 +134,6 @@ struct TabsWindow {
     scroll: usize,
     show: usize,
     max: usize,
-    want: usize,
 }
 
 impl NebulaWorkspace {
@@ -129,37 +141,44 @@ impl NebulaWorkspace {
         tab_row_height(self.density) + tab_row_gap(self.density)
     }
 
-    fn tabs_window(&self) -> TabsWindow {
-        let want = self.sidebar_row_count();
-        let show = visible_count(
-            want,
-            self.tabs_viewport_h,
-            self.tab_row_pitch(),
-            tab_row_gap(self.density),
-        );
-        let max = max_scroll(want, show);
-        let scroll = clamp_scroll(self.tabs_scroll, max);
-        TabsWindow { scroll, show, max, want }
+    fn sidebar_row_layout(&self) -> SidebarRowLayout {
+        SidebarRowLayout::new(&self.sidebar_rows(), self.density)
     }
 
-    pub(super) fn tabs_visible_window(&self) -> (usize, usize) {
-        let window = self.tabs_window();
+    fn tabs_window(&self, layout: &SidebarRowLayout) -> TabsWindow {
+        let max = layout
+            .starts
+            .len()
+            .checked_sub(1)
+            .map_or(0, |last| layout.first_fitting_start(last, self.tabs_viewport_h));
+        let scroll = self.tabs_scroll.min(max);
+        let show = layout.visible_end(scroll, self.tabs_viewport_h) - scroll;
+        TabsWindow { scroll, show, max }
+    }
+
+    pub(super) fn tabs_visible_window(&self, layout: &SidebarRowLayout) -> (usize, usize) {
+        let window = self.tabs_window(layout);
         (window.scroll, window.show)
     }
 
     pub(super) fn clamp_tabs_scroll(&mut self) {
-        let max = self.tabs_window().max;
-        let next = clamp_scroll(self.tabs_scroll, max);
-        if next != self.tabs_scroll {
-            self.tabs_scroll = next;
-        }
+        let max = self.tabs_window(&self.sidebar_row_layout()).max;
+        self.tabs_scroll = self.tabs_scroll.min(max);
     }
 
     pub(super) fn reveal_active_tab(&mut self) {
         let active_row = self.reveal_sidebar_tab();
-        let window = self.tabs_window();
-        let next = reveal_index(active_row, window.scroll, window.show);
-        self.tabs_scroll = clamp_scroll(next, window.max);
+        let layout = self.sidebar_row_layout();
+        let window = self.tabs_window(&layout);
+        self.tabs_scroll = if window.show == 0 {
+            0
+        } else if active_row < window.scroll {
+            active_row
+        } else if active_row >= window.scroll + window.show {
+            layout.first_fitting_start(active_row, self.tabs_viewport_h).min(window.max)
+        } else {
+            window.scroll
+        };
         self.top_tabs_scroll.scroll_to_item(if self.settings_open {
             self.tabs.len()
         } else {
@@ -167,24 +186,23 @@ impl NebulaWorkspace {
         });
     }
 
-    fn tabs_overlay_bar(&self) -> Option<OverlayScrollbar> {
-        if self.tabs_section_collapsed {
+    fn tabs_overlay_bar(
+        &self,
+        layout: &SidebarRowLayout,
+        window: &TabsWindow,
+    ) -> Option<OverlayScrollbar> {
+        if self.tabs_section_collapsed || window.show == 0 || window.max == 0 {
             return None;
         }
-        let window = self.tabs_window();
-        if window.show == 0 || window.want <= window.show {
-            return None;
-        }
-        let viewport =
-            rows_h(window.show, self.tab_row_pitch(), tab_row_gap(self.density)).max(1.0);
-        let content = rows_h(window.want, self.tab_row_pitch(), tab_row_gap(self.density));
-        let width = self.tabs_list_width.max(1.0);
-        let height = self.tabs_viewport_h.max(viewport);
+        let viewport = self.tabs_viewport_h;
+        let content = layout.content_height();
+        // The thumb's travel and drag mapping use the same row-based range.
+        let offset = (content - viewport) * window.scroll as f32 / window.max as f32;
         scrollbar::overlay_scrollbar(
-            (0.0, 0.0, width, height),
+            (0.0, 0.0, self.tabs_list_width.max(1.0), viewport),
             viewport,
             content,
-            window.scroll as f32 * self.tab_row_pitch(),
+            offset,
             1.0,
         )
     }
@@ -197,22 +215,26 @@ impl NebulaWorkspace {
     }
 
     fn press_tabs_scrollbar(&mut self, event: &MouseDownEvent) -> bool {
-        let Some(bar) = self.tabs_overlay_bar() else { return false };
+        let layout = self.sidebar_row_layout();
+        let window = self.tabs_window(&layout);
+        let Some(bar) = self.tabs_overlay_bar(&layout, &window) else { return false };
         let (x, y) = self.local_tabs_point(event.position);
         if !bar.hit_test(x, y) {
             return false;
         }
         let grab = if point_in_rect(bar.thumb, x, y) { y - bar.thumb.1 } else { bar.thumb.3 * 0.5 };
         self.tabs_scroll_grab = Some(grab);
-        self.tabs_scroll = bar.target_offset(y, grab, self.tabs_window().max);
+        self.tabs_scroll = bar.target_offset(y, grab, window.max);
         true
     }
 
     fn drag_tabs_scrollbar_to(&mut self, position: Point<Pixels>) -> bool {
         let Some(grab) = self.tabs_scroll_grab else { return false };
-        let Some(bar) = self.tabs_overlay_bar() else { return false };
+        let layout = self.sidebar_row_layout();
+        let window = self.tabs_window(&layout);
+        let Some(bar) = self.tabs_overlay_bar(&layout, &window) else { return false };
         let (_, y) = self.local_tabs_point(position);
-        let next = bar.target_offset(y, grab, self.tabs_window().max);
+        let next = bar.target_offset(y, grab, window.max);
         if next == self.tabs_scroll {
             return false;
         }
@@ -235,7 +257,7 @@ impl NebulaWorkspace {
         if rows == 0 {
             return;
         }
-        let max = self.tabs_window().max;
+        let max = self.tabs_window(&self.sidebar_row_layout()).max;
         let next = apply_wheel(self.tabs_scroll, max, rows);
         if next != self.tabs_scroll {
             self.tabs_scroll = next;
@@ -247,10 +269,11 @@ impl NebulaWorkspace {
     /// 列表槽：恒定右沟槽 + 覆盖 thumb + 滚轮。`items` 已是可见窗口。
     pub(super) fn wrap_tabs_scroll_list(
         &self,
+        layout: &SidebarRowLayout,
         items: impl IntoIterator<Item = gpui::AnyElement>,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let bar = self.tabs_overlay_bar();
+        let bar = self.tabs_overlay_bar(layout, &self.tabs_window(layout));
         let dragging = self.tabs_scroll_grab.is_some();
         let show_thumb = bar.is_some() && (self.tabs_list_hot || dragging);
         let workspace = cx.entity().downgrade();
@@ -331,8 +354,7 @@ impl NebulaWorkspace {
         if !height_changed && !width_changed {
             return;
         }
-        // 折叠中/已折叠：裁剪高度不是 `tabs_avail`。写回去会让
-        // `visible_count` 按 20–40px 算出 0/1 行，展开后整列锁死。
+        // Collapse clips the list to an unusable height; keep the last open viewport.
         if !self.tabs_section_collapsed
             && !self.tabs_fold_frozen
             && h >= tab_row_height(self.density)
@@ -376,66 +398,40 @@ impl NebulaWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_wheel, clamp_scroll, index_visible, max_scroll, reveal_index, rows_h, visible_count,
-        wheel_rows,
-    };
+    use super::{DensityName, SidebarRow, SidebarRowLayout, apply_wheel, wheel_rows};
 
     #[test]
     fn compact_rows_fit_more_tabs_without_shrinking_hit_targets() {
-        use super::{DensityName, tab_row_gap, tab_row_height};
         for (density, expected_height, expected_show) in
             [(DensityName::Standard, 34.0, 2), (DensityName::Compact, 32.0, 3)]
         {
-            let height = tab_row_height(density);
-            let gap = tab_row_gap(density);
-            let pitch = height + gap;
-            assert_eq!(height, expected_height);
-            assert!(height >= crate::display::ui::tokens::control::MIN_HIT_TARGET);
-            assert_eq!(rows_h(1, pitch, gap), height);
-            let show = visible_count(10, 104.0, pitch, gap);
-            assert_eq!(show, expected_show);
-            assert_eq!(reveal_index(9, 0, show), max_scroll(10, show));
+            let layout = SidebarRowLayout::new(&[SidebarRow::Tab(0, None); 10], density);
+            assert_eq!(layout.height, expected_height);
+            assert!(layout.height >= crate::display::ui::tokens::control::MIN_HIT_TARGET);
+            assert_eq!(layout.visible_end(0, 104.0), expected_show);
+            assert_eq!(layout.first_fitting_start(9, 104.0), 10 - expected_show);
+            assert_eq!(layout.visible_end(0, 0.0), 10);
+            assert_eq!(layout.visible_end(0, 20.0), 0);
         }
     }
 
-    const PITCH: f32 = 42.0;
-    const GAP: f32 = 8.0;
-
     #[test]
-    fn row_height_drops_the_trailing_gap() {
-        assert_eq!(rows_h(0, PITCH, GAP), 0.0);
-        assert_eq!(rows_h(1, PITCH, GAP), 34.0);
-        assert_eq!(rows_h(3, PITCH, GAP), 3.0 * PITCH - GAP);
-    }
-
-    #[test]
-    fn visible_count_fits_whole_rows_into_the_band() {
-        // 100px 放下 2 行（76px），放不下 3 行（118px）。
-        assert_eq!(visible_count(10, 100.0, PITCH, GAP), 2);
-        assert_eq!(visible_count(2, 100.0, PITCH, GAP), 2);
-        assert_eq!(visible_count(10, 0.0, PITCH, GAP), 10);
-        assert_eq!(visible_count(0, 100.0, PITCH, GAP), 0);
-        // 旧壳：不够一行就是 0，不能退成「一行滚动区」。
-        assert_eq!(visible_count(10, 20.0, PITCH, GAP), 0);
-    }
-
-    #[test]
-    fn scrollbar_only_exists_when_the_window_overflows() {
-        assert_eq!(max_scroll(10, 10), 0);
-        assert_eq!(max_scroll(10, 3), 7);
-        assert_eq!(clamp_scroll(9, 7), 7);
-        assert!(!index_visible(0, 2, 3));
-        assert!(index_visible(2, 2, 3));
-        assert!(index_visible(4, 2, 3));
-        assert!(!index_visible(5, 2, 3));
-    }
-
-    #[test]
-    fn activating_a_scrolled_out_tab_moves_the_window() {
-        assert_eq!(reveal_index(0, 2, 3), 0);
-        assert_eq!(reveal_index(3, 2, 3), 2);
-        assert_eq!(reveal_index(9, 0, 3), 7);
+    fn section_gaps_count_toward_the_viewport_only_between_visible_rows() {
+        use SidebarRow::{Group, Tab, Ungrouped};
+        let rows = [Group(0), Tab(0, Some(0)), Group(1), Ungrouped, Tab(1, None)];
+        let layout = SidebarRowLayout::new(&rows, DensityName::Standard);
+        let pitch = layout.pitch;
+        assert_eq!(layout.extra_gap_before(1), 0.0);
+        assert_eq!(layout.extra_gap_before(2), 6.0);
+        assert_eq!(layout.extra_gap_before(3), 6.0);
+        assert_eq!(layout.extra_gap_before(4), 0.0);
+        assert_eq!(layout.content_height(), 4.0 * pitch + 12.0 + layout.height);
+        let two_rows = pitch + layout.height;
+        assert_eq!(layout.visible_end(0, two_rows), 2);
+        assert_eq!(layout.visible_end(1, two_rows), 2);
+        assert_eq!(layout.visible_end(2, two_rows + 6.0), 4);
+        assert_eq!(layout.first_fitting_start(4, two_rows), 3);
+        assert_eq!(layout.visible_end(3, two_rows), 5);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! `workspace.rs` 单元测试。
 
+use super::shell_picker::shell_palette_rows;
 use super::*;
 
 #[test]

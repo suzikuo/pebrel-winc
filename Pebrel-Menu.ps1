@@ -5,6 +5,19 @@ Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $runner = Join-Path $PSScriptRoot 'pebrel-local.ps1'
+$buildWorker = Join-Path $PSScriptRoot 'scripts\run-local-windows-build.ps1'
+$workerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+
+function Invoke-LocalBuild([string[]] $BuildArguments) {
+    $lastLine = ''
+    & $workerShell -NoProfile -ExecutionPolicy Bypass -File $buildWorker @BuildArguments |
+        ForEach-Object { $lastLine = [string]$_; Write-Host $lastLine }
+    if ($LASTEXITCODE -ne 0) {
+        if ($lastLine) { throw $lastLine }
+        throw "Pebrel build failed (exit $LASTEXITCODE)."
+    }
+    return $lastLine
+}
 
 function Show-PebrelMenu([string] $Status) {
     $form = New-Object Windows.Forms.Form
@@ -84,13 +97,18 @@ while ($selection = Show-PebrelMenu $status) {
             if ([Windows.Forms.MessageBox]::Show($message, '确认发布', 'OKCancel', 'Warning', 'Button2') -ne 'OK') {
                 continue
             }
-            $releaseUrl = & $publisher -ExpectedCommit $plan.Commit
+            $releaseUrl = Invoke-LocalBuild @('-Action', 'Publish', '-ExpectedCommit', $plan.Commit)
             $status = "发布完成 $($plan.Tag)"
             [Windows.Forms.MessageBox]::Show("$status`n$releaseUrl", 'Pebrel', 'OK', 'Information') | Out-Null
             continue
         }
-        & $runner -Action $choice.Action -Profile $choice.Profile -Force:$selection.Force
-        if ($choice.Action -eq 'Run') { return }
+        if ($choice.Action -eq 'Run') {
+            & $runner -Action Run -Profile $choice.Profile
+            return
+        }
+        $buildArguments = @('-Action', $choice.Action)
+        if ($selection.Force) { $buildArguments += '-Force' }
+        Invoke-LocalBuild $buildArguments | Out-Null
         $status = '打包完成，产物位于项目的 dist 目录。'
     } catch {
         $status = '操作失败。详细错误见控制台。'

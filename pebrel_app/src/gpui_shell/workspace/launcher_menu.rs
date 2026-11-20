@@ -193,8 +193,11 @@ impl NebulaWorkspace {
             LauncherCommand::OpenAdmin => self.launch_administrator(&target, window, cx),
             LauncherCommand::Connect => {
                 if let LauncherTarget::Ssh(host) = target {
-                    self.dismiss_palette_state();
-                    self.add_ssh_terminal(host, window, cx);
+                    self.run_workspace_palette_action(
+                        WorkspacePaletteAction::LaunchSshHost(host),
+                        window,
+                        cx,
+                    );
                 }
             },
             LauncherCommand::Edit | LauncherCommand::Delete => {
@@ -300,8 +303,10 @@ impl NebulaWorkspace {
         });
         match elevation::is_elevated() {
             Ok(true) => {
+                let group = self.shell_picker_group;
                 self.dismiss_palette_state();
                 self.add_terminal_with(launch, cwd, None, window, cx);
+                self.assign_shell_picker_group(group, cx);
                 return;
             },
             Err(error) => {

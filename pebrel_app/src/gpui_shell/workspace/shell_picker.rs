@@ -1,8 +1,65 @@
 //! Shell/profile palette rows and their shared icon fallback.
 
+use gpui::{Context, Window};
+
 use super::{
-    WorkspacePaletteAction, WorkspacePaletteHintStyle, WorkspacePaletteRow, ssh_host_icon_ids,
+    NebulaWorkspace, WorkspacePaletteAction, WorkspacePaletteFilter, WorkspacePaletteHintStyle,
+    WorkspacePaletteRow, ssh_host_icon_ids, workspace_ui_language,
 };
+use crate::display::command_palette::LauncherFilter;
+
+impl NebulaWorkspace {
+    /// The new-tab menu and Ctrl+K share the shell picker.
+    pub(super) fn open_shell_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_shell_palette_for_group(None, window, cx);
+    }
+
+    pub(super) fn open_shell_palette_for_group(
+        &mut self,
+        group: Option<u64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_manager_open = false;
+        self.launcher_menu = None;
+        self.shell_picker_group = self.tab_groups.resolve(group);
+        let default_shell_id = crate::platform::shell::effective_shell_id(
+            cx.try_global::<crate::gpui_shell::config::Settings>()
+                .and_then(|settings| settings.shell_id.as_deref()),
+        );
+        let language = workspace_ui_language();
+        let rows = shell_palette_rows(
+            crate::shell_detect::refresh_detection(), // 打开即重扫：新装的 shell 不用重启
+            crate::terminal_profiles::TerminalProfiles::load()
+                .map(|store| store.as_config_profiles())
+                .unwrap_or_default(),
+            &crate::gpui_shell::ssh_hosts::SshHostLists::load(),
+            &default_shell_id,
+            language,
+            window.scale_factor().max(0.5),
+        );
+        self.palette_override = Some(rows);
+        self.shell_picker_open = true;
+        self.launcher_filter = LauncherFilter::All;
+        self.quick_jump_filter = None;
+        self.command_palette_open = true;
+        self.command_palette_selected = 0;
+        self.reset_palette_query(
+            WorkspacePaletteFilter::Launcher(LauncherFilter::All).placeholder(language),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(super) fn toggle_shell_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.command_palette_open && self.shell_picker_open {
+            self.close_command_palette(window, cx);
+            return;
+        }
+        self.open_shell_palette(window, cx);
+    }
+}
 
 /// shell 行的回落字形：没有品牌贴图时用 `shell_detect::icon_for_id` 的
 /// id-keyed Nerd Font 字形（与设置页下拉、命令面板同一口径）。

@@ -88,7 +88,6 @@ pub(crate) mod shell_launch;
 mod shell_picker;
 mod sidebar_resize;
 mod terminal_activity;
-use shell_picker::shell_palette_rows;
 mod settings_navigation;
 mod sidebar;
 mod ssh_dialog;
@@ -719,6 +718,7 @@ pub struct NebulaWorkspace {
     /// 三点 / Ctrl+K 打开的是旧壳 `PaletteMode::Profiles`，要画
     /// 全部/SSH/Shell 芯片；Ctrl+Shift+P 的命令目录不走这条。
     shell_picker_open: bool,
+    shell_picker_group: Option<u64>,
     launcher_menu: Option<launcher_menu::LauncherContextMenu>,
     launcher_admin_task: Option<gpui::Task<()>>,
     launcher_filter: crate::display::command_palette::LauncherFilter,
@@ -984,6 +984,7 @@ impl NebulaWorkspace {
             vcs_discard_confirm: None,
             palette_override: None,
             shell_picker_open: false,
+            shell_picker_group: None,
             launcher_menu: None,
             launcher_admin_task: None,
             launcher_filter: crate::display::command_palette::LauncherFilter::All,
@@ -1688,6 +1689,7 @@ impl NebulaWorkspace {
         self.command_palette_open = false;
         self.palette_override = None;
         self.shell_picker_open = false;
+        self.shell_picker_group = None;
         self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
         self.quick_jump_filter = None;
     }
@@ -1722,8 +1724,7 @@ impl NebulaWorkspace {
 
     fn open_quick_jump_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.command_manager_open = false;
-        self.shell_picker_open = false;
-        self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
+        self.dismiss_palette_state();
         self.quick_jump_filter = Some(QuickJumpFilter::All);
         self.palette_override = Some(quick_jump::rows(self, cx));
         self.command_palette_open = true;
@@ -1734,47 +1735,6 @@ impl NebulaWorkspace {
             cx,
         );
         cx.notify();
-    }
-
-    /// 三点 / Ctrl+K：旧壳 `NewTabMenu` → `open_shell_menu` → `PaletteMode::Profiles`。
-    fn open_shell_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.command_manager_open = false;
-        let default_shell_id = crate::platform::shell::effective_shell_id(
-            cx.try_global::<crate::gpui_shell::config::Settings>()
-                .and_then(|settings| settings.shell_id.as_deref()),
-        );
-        let language = workspace_ui_language();
-        let rows = shell_palette_rows(
-            crate::shell_detect::refresh_detection(), // 打开即重扫：新装的 shell 不用重启
-            crate::terminal_profiles::TerminalProfiles::load()
-                .map(|store| store.as_config_profiles())
-                .unwrap_or_default(),
-            &crate::gpui_shell::ssh_hosts::SshHostLists::load(),
-            &default_shell_id,
-            language,
-            window.scale_factor().max(0.5),
-        );
-        self.palette_override = Some(rows);
-        self.shell_picker_open = true;
-        self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
-        self.quick_jump_filter = None;
-        self.command_palette_open = true;
-        self.command_palette_selected = 0;
-        self.reset_palette_query(
-            WorkspacePaletteFilter::Launcher(crate::display::command_palette::LauncherFilter::All)
-                .placeholder(language),
-            window,
-            cx,
-        );
-        cx.notify();
-    }
-
-    fn toggle_shell_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_palette_open && self.shell_picker_open {
-            self.close_command_palette(window, cx);
-            return;
-        }
-        self.open_shell_palette(window, cx);
     }
 
     fn set_workspace_palette_filter(

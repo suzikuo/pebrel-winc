@@ -8,8 +8,9 @@ const TABS_DISCLOSURE_SLOT_W: f32 = 24.0;
 /// 状态图形与 hover 关闭按钮共用的方形槽，中心不随图形宽度改变。
 const TAB_STATUS_ICON_SIDE: f32 = 24.0;
 
-const GROUP_MEMBER_PADDING: f32 = 27.0;
-const GROUP_MEMBER_STRIP_X: f32 = 17.0;
+const GROUP_MEMBER_PADDING: f32 = 23.0;
+const GROUP_MEMBER_STRIP_X: f32 = 15.0;
+const GROUP_SHELL_LABEL_MIN_WIDTH: f32 = 230.0;
 
 /// 侧栏新建入口的生产命中区；鼠标测试直接复用，避免只验证一个近似按钮。
 pub(super) fn sidebar_new_tab_control(
@@ -207,13 +208,14 @@ impl NebulaWorkspace {
 
         // 折叠只裁剪槽位，不改窗口算法：旧壳 `tabs_avail` 与 `tabs_open`
         // 分开——折起来时行矩形为零，但可用高度仍按面板剩余算。
-        let (tabs_scroll, tabs_show) = self.tabs_visible_window();
+        let rows = self.sidebar_rows();
+        let row_layout = tab_scroll::SidebarRowLayout::new(&rows, self.density);
+        let (tabs_scroll, tabs_show) = self.tabs_visible_window(&row_layout);
         // 行的确定宽度：侧栏宽 − 侧栏 p_2 两边 − 列表右侧滚动条留白。
         // 与下面 `label_avail` 同一份减法口径，两者不能各算一套。
         let row_w = (self.sidebar_width - 16.0 - tab_scroll::TAB_SCROLL_GUTTER).max(1.0);
-        let items = self.sidebar_rows().into_iter().enumerate()
-            .filter(|(row, _)| tab_scroll::index_visible(*row, tabs_scroll, tabs_show))
-            .map(|(_, row)| {
+        let items = rows.into_iter().skip(tabs_scroll).take(tabs_show)
+            .map(|row| {
                 let (ix, group_index) = match row {
                     tab_groups::SidebarRow::Tab(ix, group_index) => (ix, group_index),
                     tab_groups::SidebarRow::Group(ix) => {
@@ -227,10 +229,20 @@ impl NebulaWorkspace {
                         return h_flex()
                             .w(px(row_w))
                             .h(px(row_height))
+                            .relative()
                             .items_center()
                             .px_2()
                             .text_sm()
                             .text_color(muted)
+                            .child(
+                                div()
+                                    .absolute()
+                                    .left(px(tab_groups::GROUP_GUIDE_X))
+                                    .right_2()
+                                    .top(px(3.0))
+                                    .h(px(1.0))
+                                    .bg(muted.opacity(0.24)),
+                            )
                             .when(group_drop.is_some_and(|target| target.0.is_none()), |row| {
                                 row.rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
                                     .bg(hover_bg)
@@ -262,8 +274,11 @@ impl NebulaWorkspace {
                 } = self.tab_presentation(ix, cx, dark);
                 let hover_group: SharedString = format!("sidebar-tab-hover-{ix}").into();
                 let has_program_glyph = program_glyph.is_some();
+                let shell_tag = shell_tag.filter(|tag| {
+                    group_index.is_none() || row_w >= GROUP_SHELL_LABEL_MIN_WIDTH || tag.len() <= 4
+                });
                 let status_width_cap = if group_index.is_some() {
-                    (row_w - GROUP_MEMBER_PADDING) * 0.45
+                    (row_w - GROUP_MEMBER_PADDING) * 0.30
                 } else {
                     row_w * 0.45
                 };
@@ -389,11 +404,10 @@ impl NebulaWorkspace {
                         div()
                             .absolute()
                             .left(px(tab_groups::GROUP_GUIDE_X))
-                            .top(px(1.0))
-                            .bottom(px(1.0))
+                            .top_0()
+                            .bottom_0()
                             .w(px(2.0))
-                            .rounded_full()
-                            .bg(color.opacity(if active { 0.9 } else { 0.6 })),
+                            .bg(color.opacity(if active { 0.95 } else { 0.68 })),
                     )
                 })
                 .h(px(row_height))
@@ -687,6 +701,15 @@ impl NebulaWorkspace {
                     row.into_any_element()
                 }
             })
+            .enumerate()
+            .map(|(index, item)| {
+                let extra = if index == 0 { 0.0 } else { row_layout.extra_gap_before(tabs_scroll + index) };
+                if extra > 0.0 {
+                    div().flex_shrink_0().pt(px(extra)).child(item).into_any_element()
+                } else {
+                    item
+                }
+            })
             .collect::<Vec<_>>();
 
         let header_group: SharedString = "sidebar-tabs-header-hover".into();
@@ -853,7 +876,7 @@ impl NebulaWorkspace {
                             ),
                     ),
             )
-            .child(self.render_tabs_section(items, cx));
+            .child(self.render_tabs_section(&row_layout, items, cx));
         sidebar
     }
 
@@ -884,14 +907,14 @@ impl NebulaWorkspace {
     /// Tab 列表槽位。展开时列表是侧栏 `v_flex` 的 `flex_1` 子项，视口等于
     /// 面板剩余高度（旧壳 `tabs_avail`）。折叠动画只按**上次量到的剩余
     /// 高度**卷帘，绝不按全部行高，也不把裁剪高度写回窗口。
-    fn render_tabs_section<I>(&self, items: I, cx: &mut Context<Self>) -> gpui::AnyElement
-    where
-        I: IntoIterator,
-        I::Item: IntoElement,
-    {
+    fn render_tabs_section(
+        &self,
+        row_layout: &tab_scroll::SidebarRowLayout,
+        items: Vec<gpui::AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let collapsed = self.tabs_section_collapsed;
-        let list =
-            self.wrap_tabs_scroll_list(items.into_iter().map(|item| item.into_any_element()), cx);
+        let list = self.wrap_tabs_scroll_list(row_layout, items, cx);
         if collapsed && !self.tabs_fold_frozen {
             return div().into_any_element();
         }

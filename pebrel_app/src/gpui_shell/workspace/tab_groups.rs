@@ -139,14 +139,6 @@ impl SidebarRow {
     }
 }
 
-fn drop_row_index(y: f32, pitch: f32, height: f32, visible: usize) -> Option<usize> {
-    if y < 0.0 || y % pitch >= height {
-        return None;
-    }
-    let index = (y / pitch) as usize;
-    (index < visible).then_some(index)
-}
-
 fn project_rows(
     groups: &[Group],
     collapsed: &HashSet<u64>,
@@ -200,19 +192,15 @@ impl NebulaWorkspace {
         }
         let x = x - f32::from(self.tabs_list_origin.x);
         let y = y - f32::from(self.tabs_list_origin.y);
-        let row_width = (self.sidebar_width - 16.0).min(self.tabs_list_width)
-            - tab_scroll::TAB_SCROLL_GUTTER;
+        let row_width =
+            (self.sidebar_width - 16.0).min(self.tabs_list_width) - tab_scroll::TAB_SCROLL_GUTTER;
         if x < 0.0 || x >= row_width || y >= self.tabs_viewport_h {
             return None;
         }
-        let (scroll, visible) = self.tabs_visible_window();
-        let index = drop_row_index(
-            y,
-            self.tab_row_pitch(),
-            tab_scroll::tab_row_height(self.density),
-            visible,
-        )?;
-        let row = *self.sidebar_rows().get(scroll + index)?;
+        let rows = self.sidebar_rows();
+        let layout = tab_scroll::SidebarRowLayout::new(&rows, self.density);
+        let (scroll, visible) = self.tabs_visible_window(&layout);
+        let row = rows[layout.row_at(y, scroll, visible)?];
         let destination = row.group_index().map(|index| self.tab_groups.group_id(index));
         (destination != self.tab_group_at(source)).then_some(SidebarGroupDrop(destination))
     }
@@ -262,21 +250,6 @@ impl NebulaWorkspace {
         )
     }
 
-    pub(super) fn sidebar_row_count(&self) -> usize {
-        let groups = &self.tab_groups;
-        if groups.profile.groups.is_empty() {
-            return self.tabs.len();
-        }
-        let hidden = self
-            .tab_meta
-            .iter()
-            .filter(|meta| {
-                groups.resolve(meta.group_id).is_some_and(|id| groups.collapsed.contains(&id))
-            })
-            .count();
-        self.tabs.len() + groups.profile.groups.len() + 1 - hidden
-    }
-
     pub(super) fn sidebar_tab_order(&self) -> Vec<usize> {
         if self.tab_groups.profile.groups.is_empty() {
             return (0..self.tabs.len()).collect();
@@ -316,6 +289,12 @@ impl NebulaWorkspace {
         self.tab_meta.iter().enumerate().filter_map(move |(ix, meta)| {
             (self.tab_groups.resolve(meta.group_id) == group).then_some(ix)
         })
+    }
+
+    pub(super) fn assign_shell_picker_group(&mut self, group: Option<u64>, cx: &mut Context<Self>) {
+        if let Some(group) = self.tab_groups.resolve(group) {
+            self.set_tab_group(self.active, Some(group), cx);
+        }
     }
 
     fn set_tab_group(&mut self, ix: usize, id: Option<u64>, cx: &mut Context<Self>) {
@@ -390,7 +369,7 @@ impl NebulaWorkspace {
         let dark = cx.theme().is_dark();
         let current_color = group.color;
         let accent = current_color.accent(ix, dark);
-        let tint = accent.opacity(if active { 0.25 } else { 0.12 });
+        let tint = accent.opacity(if active { 0.30 } else { 0.18 });
         h_flex()
             .id(("tab-group", ix))
             .w(px(width))
@@ -398,18 +377,15 @@ impl NebulaWorkspace {
             .items_center()
             .relative()
             .gap(px(2.0))
-            .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
-            .bg(if drop_target { accent.opacity(0.29) } else { tint })
-            .when(drop_target, |header| {
-                header.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
-                        .border_1()
-                        .border_color(accent),
-                )
-            })
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .top(px(4.0))
+                    .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
+                    .bg(if drop_target { accent.opacity(0.29) } else { tint })
+                    .when(drop_target, |fill| fill.border_1().border_color(accent)),
+            )
             .child(
                 Button::new(("tab-group-toggle", ix))
                     .ghost()
@@ -443,7 +419,9 @@ impl NebulaWorkspace {
                                     .truncate()
                                     .child(group.name.clone()),
                             )
-                            .child(div().flex_shrink_0().text_xs().child(count.to_string())),
+                            .when(collapsed, |row| {
+                                row.child(div().flex_shrink_0().text_xs().child(count.to_string()))
+                            }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !this.tab_groups.collapsed.remove(&id) {
@@ -458,13 +436,10 @@ impl NebulaWorkspace {
                     .ghost()
                     .compact()
                     .icon(IconName::Plus)
+                    .aria_label(language.text(Message::TabGroupsNewTab))
                     .tooltip(language.text(Message::TabGroupsNewTab))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        let previous_len = this.tabs.len();
-                        this.add_terminal(window, cx);
-                        if this.tabs.len() > previous_len {
-                            this.set_tab_group(this.active, Some(id), cx);
-                        }
+                        this.open_shell_palette_for_group(Some(id), window, cx);
                     })),
             )
             .child(
@@ -669,7 +644,10 @@ fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Re
             groups.push(Group { id, name: name.to_owned(), color: GroupColor::Auto });
             return Ok(());
         },
-        GroupEdit::Rename(id) | GroupEdit::Color(id, _) | GroupEdit::Move(id, _) | GroupEdit::Delete(id) => id,
+        GroupEdit::Rename(id)
+        | GroupEdit::Color(id, _)
+        | GroupEdit::Move(id, _)
+        | GroupEdit::Delete(id) => id,
     };
     let Some(ix) = groups.iter().position(|group| group.id == id) else { return Ok(()) };
     match edit {
@@ -702,7 +680,10 @@ mod tests {
         );
         update_groups(&mut groups, GroupEdit::Color(1, GroupColor::Purple), "").unwrap();
         let saved = serde_json::to_string(&groups).unwrap();
-        assert_eq!(serde_json::from_str::<Vec<Group>>(&saved).unwrap()[0].color, GroupColor::Purple);
+        assert_eq!(
+            serde_json::from_str::<Vec<Group>>(&saved).unwrap()[0].color,
+            GroupColor::Purple
+        );
         assert_eq!(GroupColor::Purple.accent(0, true), GroupColor::Purple.accent(1, true));
         update_groups(&mut groups, GroupEdit::Color(1, GroupColor::Auto), "").unwrap();
         assert!(!serde_json::to_string(&groups).unwrap().contains("color"));
@@ -710,11 +691,18 @@ mod tests {
 
     #[test]
     fn group_drop_only_hits_visible_rows_and_skips_gaps() {
-        assert_eq!(drop_row_index(-1.0, 42.0, 34.0, 2), None);
-        assert_eq!(drop_row_index(20.0, 42.0, 34.0, 2), Some(0));
-        assert_eq!(drop_row_index(35.0, 42.0, 34.0, 2), None);
-        assert_eq!(drop_row_index(50.0, 42.0, 34.0, 2), Some(1));
-        assert_eq!(drop_row_index(85.0, 42.0, 34.0, 2), None);
+        let rows = [SidebarRow::Group(0), SidebarRow::Group(1), SidebarRow::Ungrouped];
+        let density = pebrel_settings::DensityName::Standard;
+        let layout = tab_scroll::SidebarRowLayout::new(&rows, density);
+        let height = tab_scroll::tab_row_height(density);
+        let pitch = height + tab_scroll::tab_row_gap(density);
+        assert_eq!(layout.row_at(-1.0, 0, 2), None);
+        assert_eq!(layout.row_at(20.0, 0, 2), Some(0));
+        assert_eq!(layout.row_at(height, 0, 2), None);
+        assert_eq!(layout.row_at(pitch + 3.0, 0, 2), None);
+        assert_eq!(layout.row_at(pitch + 6.0, 0, 2), Some(1));
+        assert_eq!(layout.row_at(pitch + 6.0 + height, 0, 2), None);
+        assert_eq!(layout.row_at(0.0, 1, 2), Some(1));
     }
 
     #[test]

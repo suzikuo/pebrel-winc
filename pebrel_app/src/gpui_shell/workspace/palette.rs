@@ -26,12 +26,9 @@ impl NebulaWorkspace {
             return;
         }
         self.command_manager_open = false;
+        self.dismiss_palette_state();
         self.command_palette_open = true;
         self.command_palette_selected = 0;
-        self.palette_override = None;
-        self.shell_picker_open = false;
-        self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
-        self.quick_jump_filter = None;
         self.reset_palette_query(
             workspace_ui_language().pick("输入命令…", "Type a command..."),
             window,
@@ -59,6 +56,12 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let launch_group = match &action {
+            WorkspacePaletteAction::LaunchShell(_)
+            | WorkspacePaletteAction::LaunchProfile(_)
+            | WorkspacePaletteAction::LaunchSshHost(_) => self.shell_picker_group,
+            _ => None,
+        };
         match action {
             WorkspacePaletteAction::TerminalReading { commands } => {
                 self.dismiss_palette_state();
@@ -108,6 +111,7 @@ impl NebulaWorkspace {
                 self.launch_palette_profile(profile, window, cx);
             },
         }
+        self.assign_shell_picker_group(launch_group, cx);
     }
 
     /// The catalog itself is owned by the old/shared command model. This

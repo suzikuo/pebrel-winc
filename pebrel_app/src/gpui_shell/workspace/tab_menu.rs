@@ -90,8 +90,7 @@ pub(super) fn copy_working_directory_item(
 }
 
 impl NebulaWorkspace {
-    /// 右键：先选中该行（旧壳 chrome 同惯例），再按当下的 hook 身份现查
-    /// fork 资格，最后把菜单交给根上那一份宿主。
+    /// Open the menu for the addressed tab while keeping the current tab active.
     pub(super) fn open_tab_context_menu(
         &mut self,
         ix: usize,
@@ -102,12 +101,12 @@ impl NebulaWorkspace {
         if ix >= self.tabs.len() {
             return;
         }
-        self.activate_tab(ix, window, cx);
-        let terminal = self.tabs.get(ix).is_some_and(WorkspaceTab::is_terminal);
+        let terminal = self.tabs[ix].is_terminal();
         let language = crate::gpui_shell::config::ui_language(cx);
         let ai_fork = tab_ai_fork_enabled(self, ix, cx);
         let color = self.meta(ix).color;
-        let tab_count = self.tabs.len();
+        let can_move_left = self.tab_move_target(ix, false).is_some();
+        let can_move_right = self.tab_move_target(ix, true).is_some();
         let retry =
             self.tabs[ix].focused_view().filter(|view| view.read(cx).can_retry_recovery()).cloned();
         let choose_session = self.tabs[ix]
@@ -145,7 +144,8 @@ impl NebulaWorkspace {
                 terminal,
                 ai_fork,
                 color,
-                tab_count,
+                can_move_left,
+                can_move_right,
                 language,
             )
         });
@@ -207,7 +207,8 @@ impl NebulaWorkspace {
         terminal: bool,
         ai_fork: bool,
         color: Option<Rgb>,
-        tab_count: usize,
+        can_move_left: bool,
+        can_move_right: bool,
         language: UiLanguage,
     ) -> PopupMenu {
         if ai_fork {
@@ -313,12 +314,11 @@ impl NebulaWorkspace {
                 PopupMenuItem::new(language.text(Message::TabMenuMoveLeft))
                     .icon(IconName::ArrowLeft)
                     .action(Box::new(MoveTabLeft))
-                    .disabled(ix == 0)
+                    .disabled(!can_move_left)
                     .on_click(move |_, window, cx| {
                         if let Some(workspace) = move_left.upgrade() {
                             workspace.update(cx, |workspace, cx| {
-                                workspace.activate_tab(ix, window, cx);
-                                workspace.move_active_tab(false, window, cx);
+                                workspace.move_tab_by_step(ix, false, window, cx);
                             });
                         }
                     }),
@@ -327,12 +327,11 @@ impl NebulaWorkspace {
                 PopupMenuItem::new(language.text(Message::TabMenuMoveRight))
                     .icon(IconName::ArrowRight)
                     .action(Box::new(MoveTabRight))
-                    .disabled(ix + 1 >= tab_count)
+                    .disabled(!can_move_right)
                     .on_click(move |_, window, cx| {
                         if let Some(workspace) = move_right.upgrade() {
                             workspace.update(cx, |workspace, cx| {
-                                workspace.activate_tab(ix, window, cx);
-                                workspace.move_active_tab(true, window, cx);
+                                workspace.move_tab_by_step(ix, true, window, cx);
                             });
                         }
                     }),

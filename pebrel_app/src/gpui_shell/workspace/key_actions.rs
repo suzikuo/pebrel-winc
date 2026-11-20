@@ -126,15 +126,27 @@ impl NebulaWorkspace {
         if self.settings_open {
             return;
         }
-        let from = self.active;
-        let target = if self.tabs_position == pebrel_settings::TabsPositionName::Top {
+        self.move_tab_by_step(self.active, right, window, cx);
+    }
+
+    pub(super) fn tab_move_target(&self, from: usize, right: bool) -> Option<usize> {
+        if self.tabs_position == pebrel_settings::TabsPositionName::Top {
             move_target(from, self.tabs.len(), right)
         } else if right {
             self.sidebar_drag_peers(from).find(|&ix| ix > from)
         } else {
             self.sidebar_drag_peers(from).take_while(|&ix| ix < from).last()
-        };
-        let Some(to) = target else { return };
+        }
+    }
+
+    pub(super) fn move_tab_by_step(
+        &mut self,
+        from: usize,
+        right: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(to) = self.tab_move_target(from, right) else { return };
         self.move_tab(from, to, window, cx);
         // 顶栏模式下标签可能刚被挪出可视窗口；侧栏模式同样按整行窗口对齐。
         self.reveal_active_tab();
