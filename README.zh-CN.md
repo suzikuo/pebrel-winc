@@ -41,7 +41,7 @@
 ## 发布 Windows 版本
 
 1. 在 `winc-local` 上将 `pebrel_app/Cargo.toml` 中的应用版本及 `Cargo.lock` 中 `pebrel` 的版本改为新的 `X.Y.Z`。同步更新 `CHANGELOG.md` 和 `docs/release-notes/winc-vX.Y.Z.md`。
-2. 提交并推送到 fork 的 `winc-local`。准备好 Windows Rust 工具链和 Inno Setup 6，并用 GitHub CLI 登录有仓库发布权限的账号。
+2. 提交并推送到 fork 的 `winc-local`。准备好 Windows Rust 工具链和 Inno Setup 6，并用 GitHub CLI 登录有仓库发布权限的账号。便携 Inno Setup 可放到 `target/installer-tools/Inno Setup 6`，也可通过 `ISCC_PATH` 指定 `ISCC.exe`。
 3. 双击 `Pebrel-Menu.cmd`，选「发布到 GitHub Releases（Windows x64）」并确认版本与提交。菜单会重新构建安装包和 ZIP，在 `dist/winc-vX.Y.Z/` 生成 SHA-256 清单，并验证 GitHub 草稿的资产后发布。
 
 如果上传中断，可在 GitHub 检查并删除此次的草稿，再从同一提交重试。安装包默认安装到 `%LOCALAPPDATA%\Programs\Pebrel Winc`，使用 `%LOCALAPPDATA%\PebrelWincNative` 配置目录。

@@ -82,10 +82,20 @@ $output = Join-Path $repo "dist\$tag"
 $target = Join-Path $repo 'target\winc-publish'
 & (Join-Path $PSScriptRoot 'prepare-windows-runtime.ps1') `
     -Destination (Join-Path $repo 'assets\windows\conhost') -Architecture x64 | Out-Host
-& (Join-Path $PSScriptRoot 'build-installer.ps1') -Version $version -WincInstall `
-    -TargetDirectory $target -OutputDirectory $output -Force | Out-Host
-& (Join-Path $PSScriptRoot 'package-release.ps1') -Version $version `
-    -TargetDirectory $target -OutputDirectory $output -Force | Out-Host
+$previousRevision = $env:PEBREL_BUILD_REVISION
+try {
+    $env:PEBREL_BUILD_REVISION = $commit
+    & (Join-Path $PSScriptRoot 'build-installer.ps1') -Version $version -WincInstall `
+        -TargetDirectory $target -OutputDirectory $output -Force | Out-Host
+    & (Join-Path $PSScriptRoot 'package-release.ps1') -Version $version `
+        -TargetDirectory $target -OutputDirectory $output -Force | Out-Host
+} finally {
+    $env:PEBREL_BUILD_REVISION = $previousRevision
+}
+$builtVersion = Invoke-Native (Join-Path $target 'release\pebrel.exe') @('--version')
+if ($builtVersion -cne "Pebrel $version ($($commit.Substring(0, 12)))") {
+    throw "Built executable did not report the release version and commit: $builtVersion"
+}
 if ((Invoke-Git @('rev-parse', 'HEAD')) -cne $commit) {
     throw 'Source changed during packaging.'
 }

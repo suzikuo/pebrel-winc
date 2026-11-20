@@ -94,9 +94,11 @@ if (-not $ValidateOnly) {
     if ([string]::IsNullOrWhiteSpace($InnoCompiler)) {
         $candidates = @(
             $env:ISCC_PATH,
+            (Get-Command ISCC.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
             (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
             (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
-            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $repo 'target\installer-tools\Inno Setup 6\ISCC.exe')
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         $InnoCompiler = $candidates | Where-Object {
             Test-Path -LiteralPath $_ -PathType Leaf

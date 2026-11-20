@@ -109,6 +109,16 @@ fn deploy_conpty() {
 }
 
 fn commit_hash() -> Option<String> {
+    // Release packaging supplies the confirmed source revision. Track it so
+    // Cargo cannot reuse the build script's revision from an earlier package.
+    const BUILD_REVISION: &str = "PEBREL_BUILD_REVISION";
+    println!("cargo:rerun-if-env-changed={BUILD_REVISION}");
+    if let Ok(revision) = env::var(BUILD_REVISION)
+        && revision.len() == 40
+        && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Some(revision[..12].to_owned());
+    }
     Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
