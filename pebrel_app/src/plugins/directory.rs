@@ -11,11 +11,22 @@ const DISTRIBUTION: &str = "{distribution}";
 const DIRECTORY: &str = "{directory}";
 const MAX_ARGS: usize = 16;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LauncherIcon {
+    #[default]
+    ExternalLink,
+    FolderOpen,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Launcher {
     pub(crate) id: String,
     pub(crate) title: String,
+    // Omitting the icon preserves the serialized approval for existing installs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) icon: Option<LauncherIcon>,
     pub(crate) executable: String,
     #[serde(default)]
     pub(crate) windows_args: Vec<String>,

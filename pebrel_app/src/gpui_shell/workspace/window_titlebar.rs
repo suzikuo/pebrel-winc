@@ -256,7 +256,13 @@ mod tests {
             {
                 let selector = "directory-launcher/example.directory-launcher/open-directory";
                 let launcher = window.debug_bounds(selector).unwrap();
-                assert!(launcher.right() < find.left(), "{position:?}");
+                assert_eq!(launcher.size, find.size, "{position:?}");
+                assert_eq!(launcher.center().y, find.center().y, "{position:?}");
+                assert_eq!(
+                    find.left() - launcher.right(),
+                    px(TITLE_BAR_CONTROL_GAP),
+                    "{position:?}"
+                );
                 window.update(|window, cx| {
                     workspace.update(cx, |workspace, cx| {
                         workspace.set_test_plugin_toolbar(false);

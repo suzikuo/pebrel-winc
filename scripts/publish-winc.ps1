@@ -24,16 +24,40 @@ function Invoke-Native([string] $Executable, [string[]] $CommandArgs) {
 }
 
 function Invoke-Git([string[]] $CommandArgs) {
-    Invoke-Native 'git' (@('-C', $repo, '-c', 'core.autocrlf=false') + $CommandArgs)
+    Invoke-Native 'git' (@('-C', $repo, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false',
+        '-c', 'core.quotePath=false') + $CommandArgs)
 }
 
 function Assert-CleanSource {
-    # Windows Git may report an upstream CRLF blob as modified under eol=lf.
-    # Compare text modulo CRLF, while retaining checks for staged and untracked files.
-    Invoke-Git @('diff', '--no-ext-diff', '--quiet', '--ignore-cr-at-eol', 'HEAD', '--')
-    if ((Invoke-Git @('diff', '--cached', '--name-only', '--')) -or
-        (Invoke-Git @('ls-files', '--others', '--exclude-standard'))) {
-        throw 'Commit the source and release notes before publishing.'
+    $staged = @(Invoke-Git @('diff', '--cached', '--name-only', '--'))
+    $untracked = @(Invoke-Git @('ls-files', '--others', '--exclude-standard'))
+    $unstaged = @(foreach ($entry in (Invoke-Git @('diff', '--raw', '--no-abbrev', '--no-renames',
+        '--no-ext-diff', '--ignore-cr-at-eol', 'HEAD', '--'))) {
+        if ($entry -cnotmatch '^:(?<oldMode>[0-7]{6}) (?<newMode>[0-7]{6}) (?<oldBlob>[0-9a-f]+) [0-9a-f]+ (?<state>[A-Z])\t(?<path>.+)$') {
+            throw 'Git returned an unexpected source change record.'
+        }
+        $path = $Matches.path
+        $oldMode = $Matches.oldMode
+        $oldBlob = $Matches.oldBlob
+        # Git's text filters can report an upstream CRLF blob as modified even
+        # when the file on disk is byte-for-byte identical to HEAD.
+        if ($path -notin $staged -and $Matches.state -ceq 'M' -and $oldMode -ceq $Matches.newMode -and
+            $oldMode -in @('100644', '100755')) {
+            $file = Get-Item -LiteralPath (Join-Path $repo $path)
+            if (!$file.PSIsContainer -and !($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+                (Invoke-Git @('hash-object', '--no-filters', '--', $path)) -ceq $oldBlob) {
+                continue
+            }
+        }
+        if ($path -notin $staged) { $path }
+    })
+    $changes = @($staged | ForEach-Object { "Staged  $_" }) +
+        @($unstaged | ForEach-Object { "Modified  $_" }) +
+        @($untracked | ForEach-Object { "Untracked  $_" })
+    if ($changes.Count) {
+        $summary = @($changes | Select-Object -First 6) -join "`n"
+        $extra = if ($changes.Count -gt 6) { "`n... $($changes.Count - 6) more (see git status)." }
+        throw "Cannot publish from an uncommitted workspace ($($changes.Count) files).`nCommit the intended source and release notes before publishing.`n`n$summary$extra"
     }
 }
 
@@ -124,7 +148,10 @@ $body = $notes + "`n`n## SHA256`n`n" + (($lines | ForEach-Object {
 
 # Create the tag without force. A failed upload can never replace a released tag.
 # The per-command helper uses the existing GitHub CLI login.
-$helper = '!"' + $gh.Replace('\', '/') + '" auth git-credential'
+# Windows PowerShell strips embedded double quotes in native arguments. Use
+# shell single quotes so Git can run gh.exe from paths such as Program Files.
+$ghPath = $gh.Replace('\', '/').Replace("'", "'\''")
+$helper = "!'$ghPath' auth git-credential"
 Invoke-Git @('-c', 'credential.helper=', '-c', "credential.https://github.com.helper=$helper",
     'push', $repositoryUrl, "${commit}:refs/tags/$tag") | Write-Host
 $expectedTag = "$commit`trefs/tags/$tag"

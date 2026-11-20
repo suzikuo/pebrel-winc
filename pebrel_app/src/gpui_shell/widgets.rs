@@ -141,6 +141,8 @@ pub(crate) fn settings_select_frame(
         .child(control)
 }
 
+pub(crate) const TOOLBAR_BUTTON_SIZE: f32 = 32.0;
+
 /// Toolbar glyphs and their hover/hit surfaces have independent logical sizes.
 /// Ghost buttons default to an arrow cursor, so only enabled ones get the pointer.
 pub(crate) fn toolbar_button(
@@ -151,7 +153,7 @@ pub(crate) fn toolbar_button(
     Button::new(id)
         .icon(Icon::new(icon).size(px(18.0)))
         .ghost()
-        .size(px(32.0))
+        .size(px(TOOLBAR_BUTTON_SIZE))
         .disabled(disabled)
         .when(!disabled, |button| button.cursor_pointer())
 }

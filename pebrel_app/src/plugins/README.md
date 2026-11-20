@@ -66,12 +66,13 @@ A package can declare `[[directory_launchers]]` in `plugin.toml`. A launcher dec
 `windows_args`, and optional `wsl_args`. Action IDs are unique across `commands` and
 `directory_launchers`. A launcher-only plugin may omit `commands`.
 
-On Windows, the workspace title bar shows buttons for installed, enabled launchers. A plugin
-with one launcher uses its package name as the button label. With multiple launchers, each
-button uses its action title. The tooltip gives the action title when the current pane is
-supported. Clicking a button captures the focused pane's directory. For a Windows pane,
-Pebrel uses its directory as the working directory and passes `windows_args` as literal
-arguments. For a WSL pane, it uses `wsl_args` with `{distribution}` and `{directory}`
+An `icon` is optional. Use `external_link` (the default) or `folder_open`.
+
+On Windows, the workspace title bar shows installed, enabled launchers using the same icon
+buttons as the built-in controls. The action title is the accessible name and appears in the
+tooltip when the current pane is supported. Clicking a button captures the focused pane's
+directory. For a Windows pane, Pebrel uses its directory as the working directory and passes
+`windows_args` as literal arguments. For a WSL pane, it uses `wsl_args` with `{distribution}` and `{directory}`
 substituted once each as whole arguments. An omitted `wsl_args` limits the launcher to
 Windows panes. Buttons are disabled for SSH panes and when no supported directory is known.
 

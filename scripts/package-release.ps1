@@ -122,10 +122,8 @@ function Get-NewestSourceTime([string[]] $Roots) {
 }
 
 function Assert-FreshBinaries {
-    # 判据：打包的二进制不得早于其源码的最新改动（2026-08-18 事故：修复
-    # 已写进源码，包里却是前一晚的 exe）。cargo 对未变更目标不重链接，
-    # 所以不能拿「本次运行开始时刻」当基准。conpty.dll / OpenConsole.exe
-    # 是预编译供给件，不参与判定。
+    # Without a Cargo build, use a conservative source timestamp check.
+    # The bundled ConPTY binaries are supplied prebuilt.
     if ($AllowStale) { return }
     $memberDirs = @(
         'pebrel_app', 'pebrel_terminal', 'pebrel_config', 'pebrel_config_derive',
@@ -163,7 +161,9 @@ if ($missing.Count -ne 0) {
 $packagedExe = $manifest['pebrel.exe']
 . (Join-Path $PSScriptRoot 'windows-package-architecture.ps1')
 Assert-WindowsPackageArchitecture -Root $targetRoot -Architecture $Architecture
-Assert-FreshBinaries
+# The explicit product build checks each binary's Cargo inputs. A GUI-only edit
+# can legitimately leave the CLI executable's timestamp unchanged.
+if ($SkipBuild) { Assert-FreshBinaries }
 if ($PackageBrand -eq 'Pebrel' -and (Get-Item -LiteralPath $packagedExe).VersionInfo.ProductName -ne 'Pebrel') {
     throw 'Pebrel packages require a freshly built Pebrel executable, not renamed Nebula binaries.'
 }

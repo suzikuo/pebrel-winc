@@ -24,10 +24,16 @@ optional reference in tab metadata and the compatible session schema. A missing
 reference displays as ungrouped. A definition file with a parse or read error
 is preserved and edits fail visibly.
 
+When a group has a chosen color, store it in the same profile definition. Older
+entries use the automatic palette. The sidebar uses the same accent for the
+header and member guides.
+
 Project sidebar headers, members, and ungrouped tabs before applying viewport
 scrolling. Keep collapse local to a window. Activating a hidden tab expands its
-group. Tab reordering in the sidebar operates within one group, with assignment
-in the tab menu. The top tab layout continues to use the flat tab order.
+group. Dragging a terminal onto another group's header or member appends it to
+that group and expands the destination. The Ungrouped row is a drop target even
+when it has no members. Reorder within a group and keep assignment in the tab
+menu. The top tab layout continues to use the flat tab order.
 
 ## Rejected alternatives
 

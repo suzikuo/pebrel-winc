@@ -48,7 +48,8 @@ try {
         throw 'Release packaging must refuse stale binaries (freshness guard missing).'
     }
 
-    & $packageScript -Version 'unreleased' -SkipBuild -AllowStale -OutputDirectory $resolvedOutput -TargetDirectory $TargetDirectory
+    # The product build can reuse a CLI unchanged by recent GUI edits.
+    & $packageScript -Version 'unreleased' -OutputDirectory $resolvedOutput -TargetDirectory $TargetDirectory
     $zipPath = Join-Path $resolvedOutput 'Pebrel-vunreleased-windows-x64.zip'
     if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
         throw "Packaging script did not create $zipPath"

@@ -233,6 +233,10 @@ impl CrossWindowTabDrag {
     pub(crate) fn source_window_id(&self) -> u64 {
         self.source_window_id
     }
+
+    pub(super) fn source_tab_index(&self, workspace: &NebulaWorkspace) -> Option<usize> {
+        workspace.tab_of_pane(self.pane_id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

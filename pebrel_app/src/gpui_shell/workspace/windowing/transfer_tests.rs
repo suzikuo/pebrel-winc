@@ -187,6 +187,7 @@ fn alt_release_tears_out_tab_from_within_the_window(cx: &mut TestAppContext) {
                         active: false,
                         force_tear_out: false,
                         dock: None,
+                        sidebar_group_drop: None,
                     });
                     // 按住 Alt 拖过 4px 阈值：这一步把撕出意图锁存下来。
                     let alt = gpui::Modifiers { alt: true, ..Default::default() };
@@ -255,6 +256,7 @@ fn nc_move_without_pressed_button_keeps_active_alt_drag_alive(cx: &mut TestAppCo
                         active: false,
                         force_tear_out: false,
                         dock: None,
+                        sidebar_group_drop: None,
                     });
                     let alt = gpui::Modifiers { alt: true, ..Default::default() };
                     source.update_tab_drag(
@@ -329,6 +331,7 @@ fn nc_move_still_clears_pending_drag_without_committing(cx: &mut TestAppContext)
                         active: false,
                         force_tear_out: false,
                         dock: None,
+                        sidebar_group_drop: None,
                     });
                     source.update_tab_drag(
                         &gpui::MouseMoveEvent {

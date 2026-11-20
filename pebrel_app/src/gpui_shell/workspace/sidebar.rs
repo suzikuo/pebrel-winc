@@ -8,6 +8,9 @@ const TABS_DISCLOSURE_SLOT_W: f32 = 24.0;
 /// 状态图形与 hover 关闭按钮共用的方形槽，中心不随图形宽度改变。
 const TAB_STATUS_ICON_SIDE: f32 = 24.0;
 
+const GROUP_MEMBER_PADDING: f32 = 27.0;
+const GROUP_MEMBER_STRIP_X: f32 = 17.0;
+
 /// 侧栏新建入口的生产命中区；鼠标测试直接复用，避免只验证一个近似按钮。
 pub(super) fn sidebar_new_tab_control(
     header_group: SharedString,
@@ -199,6 +202,7 @@ impl NebulaWorkspace {
             .as_ref()
             .filter(|d| d.active && d.axis == TabDragAxis::Vertical)
             .map(|d| (d.source, self.sidebar_drag_target(d), d.offset));
+        let group_drop = self.tab_drag.as_ref().and_then(|drag| drag.sidebar_group_drop);
         let drag_group = drag.map(|(source, _, _)| self.tab_group_at(source));
 
         // 折叠只裁剪槽位，不改窗口算法：旧壳 `tabs_avail` 与 `tabs_open`
@@ -210,10 +214,13 @@ impl NebulaWorkspace {
         let items = self.sidebar_rows().into_iter().enumerate()
             .filter(|(row, _)| tab_scroll::index_visible(*row, tabs_scroll, tabs_show))
             .map(|(_, row)| {
-                let ix = match row {
-                    tab_groups::SidebarRow::Tab(ix) => ix,
+                let (ix, group_index) = match row {
+                    tab_groups::SidebarRow::Tab(ix, group_index) => (ix, group_index),
                     tab_groups::SidebarRow::Group(ix) => {
-                        return self.render_tab_group_header(ix, row_w, row_height, cx);
+                        let drop_target = group_drop.is_some_and(|target| {
+                            target.0 == Some(self.tab_groups.group_id(ix))
+                        });
+                        return self.render_tab_group_header(ix, row_w, row_height, drop_target, cx);
                     },
                     tab_groups::SidebarRow::Ungrouped => {
                         let language = crate::gpui_shell::config::ui_language(cx);
@@ -224,11 +231,21 @@ impl NebulaWorkspace {
                             .px_2()
                             .text_sm()
                             .text_color(muted)
+                            .when(group_drop.is_some_and(|target| target.0.is_none()), |row| {
+                                row.rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
+                                    .bg(hover_bg)
+                                    .border_1()
+                                    .border_color(theme.primary)
+                            })
                             .child(language.text(crate::i18n::Message::TabGroupsUngrouped))
                             .into_any_element();
                     },
                 };
                 let active = ix == self.active;
+                let group_accent = group_index.map(|index| self.tab_groups.accent(index, dark));
+                let group_drop_hover = group_drop.is_some_and(|target| {
+                    target.0 == group_index.map(|index| self.tab_groups.group_id(index))
+                });
                 let TabPresentation {
                     title,
                     tooltip,
@@ -245,22 +262,22 @@ impl NebulaWorkspace {
                 } = self.tab_presentation(ix, cx, dark);
                 let hover_group: SharedString = format!("sidebar-tab-hover-{ix}").into();
                 let has_program_glyph = program_glyph.is_some();
+                let status_width_cap = if group_index.is_some() {
+                    (row_w - GROUP_MEMBER_PADDING) * 0.45
+                } else {
+                    row_w * 0.45
+                };
                 let status_width = Self::shell_status_width(
                     window,
                     shell_tag.as_ref(),
                     &metadata_family,
                     label_px * SIDEBAR_TAG_SCALE,
                     TAB_STATUS_SLOT_W,
-                    row_w * 0.45,
+                    status_width_cap,
                 );
                 let cross_window_drag = self.cross_window_drag_payload(ix, cx);
-                // 用户明确设置过的标签色：行左侧一条竖光条（上下各留 7、宽 2.5，
-                // 与旧壳 strip 同源）。默认标签不占这层视觉层级。
-                //
-                // 光条贴住行左缘，不沿用旧壳的左内缩 4：旧壳内容起点是 14px，这里
-                // 是 `px_2` = 0.5rem，rem 跟随界面字号（默认 14 → 7px，最小 10 →
-                // 5px）。内缩会让光条贴上图标；贴边时间隙就是内边距减光条宽，随
-                // 字号一起缩放。
+                // Group membership uses a guide in the indentation gutter. Keep
+                // explicit tab colors separate, next to the tab's own content.
                 let strip = tab_color.map(|color| gpui::Rgba {
                     r: color.r as f32 / 255.0,
                     g: color.g as f32 / 255.0,
@@ -336,6 +353,7 @@ impl NebulaWorkspace {
                 // 拖拽期间不变，释放时一次性提交。
                 let (dragged, shift) = match drag.filter(|_| drag_group == Some(self.tab_group_at(ix))) {
                     Some((src, _, _)) if ix == src => (true, 0.0),
+                    Some(_) if group_drop.is_some() => (false, 0.0),
                     Some((src, tgt, _)) if src < tgt && ix > src && ix <= tgt => {
                         (false, -row_pitch)
                     },
@@ -366,6 +384,18 @@ impl NebulaWorkspace {
                 .overflow_hidden()
                 .gap_2()
                 .px_2()
+                .when_some(group_accent, |row, color| {
+                    row.pl(px(GROUP_MEMBER_PADDING)).child(
+                        div()
+                            .absolute()
+                            .left(px(tab_groups::GROUP_GUIDE_X))
+                            .top(px(1.0))
+                            .bottom(px(1.0))
+                            .w(px(2.0))
+                            .rounded_full()
+                            .bg(color.opacity(if active { 0.9 } else { 0.6 })),
+                    )
+                })
                 .h(px(row_height))
                 .items_center()
                 // 旧壳 pill 圆角 = UI_CORNER_RADIUS_LOGICAL(8)，rounded_md(6)
@@ -380,6 +410,9 @@ impl NebulaWorkspace {
                     item.text_color(muted).hover(|style| style.bg(hover_bg))
                 })
                 .when(!active && dragged, |item| item.text_color(muted).bg(hover_bg))
+                .when(group_drop_hover && !active, |item| {
+                    item.bg(group_accent.unwrap_or(theme.primary).opacity(0.16))
+                })
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.activate_tab(ix, window, cx);
                 }))
@@ -401,6 +434,7 @@ impl NebulaWorkspace {
                             active: false,
                             force_tear_out: false,
                             dock: None,
+                            sidebar_group_drop: None,
                         });
                     }),
                 )
@@ -420,7 +454,7 @@ impl NebulaWorkspace {
                     row.child(
                         div()
                             .absolute()
-                            .left_0()
+                            .left(px(if group_index.is_some() { GROUP_MEMBER_STRIP_X } else { 0.0 }))
                             .top(px(7.0))
                             .w(px(2.5))
                             .h(px(row_height - 14.0))

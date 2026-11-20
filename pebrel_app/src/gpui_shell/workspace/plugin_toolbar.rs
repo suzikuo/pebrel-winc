@@ -1,12 +1,11 @@
 //! Windows title-bar buttons for explicitly authorized directory launchers.
 
 use super::*;
+use crate::gpui_shell::widgets::{TOOLBAR_BUTTON_SIZE, toolbar_button};
 use crate::i18n::Message;
 use crate::plugins::Grant;
-use crate::plugins::directory::{Launcher, Target};
+use crate::plugins::directory::{Launcher, LauncherIcon, Target};
 use crate::plugins::install::Library;
-
-const BUTTON_WIDTH: f32 = 88.0;
 
 pub(in crate::gpui_shell) struct PluginLibraryChanged;
 impl gpui::Global for PluginLibraryChanged {}
@@ -14,7 +13,6 @@ impl gpui::Global for PluginLibraryChanged {}
 #[derive(Clone)]
 struct Entry {
     plugin_id: String,
-    label: SharedString,
     launcher: Launcher,
 }
 
@@ -68,14 +66,10 @@ impl NebulaWorkspace {
                         for plugin in listing.plugins.into_iter().filter(|plugin| {
                             plugin.enabled && plugin.grants.contains(&Grant::DirectoryLauncher)
                         }) {
-                            let single = plugin.directory_launchers.len() == 1;
                             for launcher in plugin.directory_launchers {
-                                let label = if single { &plugin.name } else { &launcher.title };
-                                this.plugin_toolbar.entries.push(Entry {
-                                    plugin_id: plugin.id.clone(),
-                                    label: label.clone().into(),
-                                    launcher,
-                                });
+                                this.plugin_toolbar
+                                    .entries
+                                    .push(Entry { plugin_id: plugin.id.clone(), launcher });
                             }
                         }
                     },
@@ -88,7 +82,7 @@ impl NebulaWorkspace {
 
     pub(super) fn plugin_toolbar_width(&self) -> f32 {
         self.plugin_toolbar.entries.len() as f32
-            * (BUTTON_WIDTH + window_titlebar::TITLE_BAR_CONTROL_GAP)
+            * (TOOLBAR_BUTTON_SIZE + window_titlebar::TITLE_BAR_CONTROL_GAP)
     }
 
     #[cfg(all(test, feature = "gpui-test-support"))]
@@ -98,10 +92,10 @@ impl NebulaWorkspace {
         if enabled {
             self.plugin_toolbar.entries.push(Entry {
                 plugin_id: "example.directory-launcher".into(),
-                label: "Directory Viewer".into(),
                 launcher: Launcher {
                     id: "open-directory".into(),
                     title: "Open Directory".into(),
+                    icon: Some(LauncherIcon::FolderOpen),
                     executable: r"C:\Tools\viewer.exe".into(),
                     windows_args: Vec::new(),
                     wsl_args: None,
@@ -131,18 +125,15 @@ impl NebulaWorkspace {
                 } else {
                     language.text(Message::SettingsPluginsLauncherNoTarget).into()
                 };
+                let icon = match entry.launcher.icon.unwrap_or_default() {
+                    LauncherIcon::ExternalLink => IconName::ExternalLink,
+                    LauncherIcon::FolderOpen => IconName::FolderOpen,
+                };
                 let entry = entry.clone();
-                Button::new(id.clone())
+                toolbar_button(id.clone(), icon, disabled)
                     .debug_selector(move || id.to_string())
-                    .ghost()
-                    .size(px(32.0))
-                    .w(px(BUTTON_WIDTH))
-                    .h(px(32.0))
-                    .disabled(disabled)
-                    .when(!disabled, |button| button.cursor_pointer())
                     .aria_label(title)
                     .tooltip(tooltip)
-                    .child(div().truncate().child(entry.label.clone()))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.run_plugin_launcher(&entry, window, cx);
                     }))

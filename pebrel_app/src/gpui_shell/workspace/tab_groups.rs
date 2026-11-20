@@ -7,10 +7,57 @@ use gpui_component::menu::PopupMenuItem;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io, path::PathBuf};
 
+pub(super) const GROUP_GUIDE_X: f32 = 8.0;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum GroupColor {
+    Blue,
+    Purple,
+    Teal,
+    Orange,
+    Pink,
+    Green,
+    #[default]
+    #[serde(other)]
+    Auto,
+}
+
+impl GroupColor {
+    const CHOICES: [(Self, Message); 7] = [
+        (Self::Auto, Message::TabGroupsColorAuto),
+        (Self::Blue, Message::TabGroupsColorBlue),
+        (Self::Purple, Message::TabGroupsColorPurple),
+        (Self::Teal, Message::TabGroupsColorTeal),
+        (Self::Orange, Message::TabGroupsColorOrange),
+        (Self::Pink, Message::TabGroupsColorPink),
+        (Self::Green, Message::TabGroupsColorGreen),
+    ];
+
+    fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    fn accent(self, index: usize, dark: bool) -> gpui::Hsla {
+        let hue = match self {
+            Self::Auto => [215.0, 276.0, 168.0, 32.0, 335.0, 95.0][index % 6],
+            Self::Blue => 215.0,
+            Self::Purple => 276.0,
+            Self::Teal => 168.0,
+            Self::Orange => 32.0,
+            Self::Pink => 335.0,
+            Self::Green => 95.0,
+        };
+        gpui::hsla(hue / 360.0, 0.61, if dark { 0.68 } else { 0.36 }, 1.0)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Group {
     id: u64,
     name: String,
+    #[serde(default, skip_serializing_if = "GroupColor::is_auto")]
+    color: GroupColor,
 }
 
 #[derive(Clone, Default)]
@@ -60,6 +107,14 @@ impl TabGroups {
         Self { profile, collapsed: HashSet::new(), _subscription: subscription }
     }
 
+    pub(super) fn accent(&self, index: usize, dark: bool) -> gpui::Hsla {
+        self.profile.groups[index].color.accent(index, dark)
+    }
+
+    pub(super) fn group_id(&self, index: usize) -> u64 {
+        self.profile.groups[index].id
+    }
+
     pub(super) fn resolve(&self, id: Option<u64>) -> Option<u64> {
         id.filter(|id| self.profile.groups.iter().any(|group| group.id == *id))
     }
@@ -69,7 +124,27 @@ impl TabGroups {
 pub(super) enum SidebarRow {
     Group(usize),
     Ungrouped,
-    Tab(usize),
+    Tab(usize, Option<usize>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SidebarGroupDrop(pub(super) Option<u64>);
+
+impl SidebarRow {
+    fn group_index(self) -> Option<usize> {
+        match self {
+            Self::Group(index) | Self::Tab(_, Some(index)) => Some(index),
+            _ => None,
+        }
+    }
+}
+
+fn drop_row_index(y: f32, pitch: f32, height: f32, visible: usize) -> Option<usize> {
+    if y < 0.0 || y % pitch >= height {
+        return None;
+    }
+    let index = (y / pitch) as usize;
+    (index < visible).then_some(index)
 }
 
 fn project_rows(
@@ -82,10 +157,10 @@ fn project_rows(
     for (ix, id) in membership.into_iter().enumerate() {
         if let Some(group_ix) = groups.iter().position(|group| Some(group.id) == id) {
             if !collapsed.contains(&groups[group_ix].id) {
-                members[group_ix].push(SidebarRow::Tab(ix));
+                members[group_ix].push(SidebarRow::Tab(ix, Some(group_ix)));
             }
         } else {
-            ungrouped.push(SidebarRow::Tab(ix));
+            ungrouped.push(SidebarRow::Tab(ix, None));
         }
     }
     let mut rows = Vec::new();
@@ -93,7 +168,7 @@ fn project_rows(
         rows.push(SidebarRow::Group(ix));
         rows.extend(members);
     }
-    if !groups.is_empty() && !ungrouped.is_empty() {
+    if !groups.is_empty() {
         rows.push(SidebarRow::Ungrouped);
     }
     rows.extend(ungrouped);
@@ -104,11 +179,81 @@ fn project_rows(
 enum GroupEdit {
     Create,
     Rename(u64),
+    Color(u64, GroupColor),
     Move(u64, isize),
     Delete(u64),
 }
 
 impl NebulaWorkspace {
+    pub(super) fn sidebar_group_drop_at(
+        &self,
+        source: usize,
+        x: f32,
+        y: f32,
+    ) -> Option<SidebarGroupDrop> {
+        if self.tabs_section_collapsed
+            || self.tabs_fold_frozen
+            || self.tab_groups.profile.groups.is_empty()
+            || !self.tabs.get(source).is_some_and(WorkspaceTab::is_terminal)
+        {
+            return None;
+        }
+        let x = x - f32::from(self.tabs_list_origin.x);
+        let y = y - f32::from(self.tabs_list_origin.y);
+        let row_width = (self.sidebar_width - 16.0).min(self.tabs_list_width)
+            - tab_scroll::TAB_SCROLL_GUTTER;
+        if x < 0.0 || x >= row_width || y >= self.tabs_viewport_h {
+            return None;
+        }
+        let (scroll, visible) = self.tabs_visible_window();
+        let index = drop_row_index(
+            y,
+            self.tab_row_pitch(),
+            tab_scroll::tab_row_height(self.density),
+            visible,
+        )?;
+        let row = *self.sidebar_rows().get(scroll + index)?;
+        let destination = row.group_index().map(|index| self.tab_groups.group_id(index));
+        (destination != self.tab_group_at(source)).then_some(SidebarGroupDrop(destination))
+    }
+
+    pub(super) fn drop_tab_in_group(
+        &mut self,
+        source: usize,
+        destination: SidebarGroupDrop,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let SidebarGroupDrop(group) = destination;
+        if !self.tabs.get(source).is_some_and(WorkspaceTab::is_terminal)
+            || self.tab_groups.resolve(group) != group
+        {
+            return;
+        }
+        let last = self
+            .tab_meta
+            .iter()
+            .enumerate()
+            .rfind(|(index, meta)| {
+                *index != source && self.tab_groups.resolve(meta.group_id) == group
+            })
+            .map(|(index, _)| index);
+        let source_active = self.active == source;
+        self.tab_meta[source].group_id = group;
+        if let Some(group) = group {
+            self.tab_groups.collapsed.remove(&group);
+        }
+        if let Some(last) = last {
+            let insert_at = last + usize::from(source > last);
+            self.move_tab(source, insert_at, window, cx);
+        }
+        if source_active {
+            self.reveal_active_tab();
+        }
+        self.clamp_tabs_scroll();
+        cx.notify();
+    }
+
     pub(super) fn sidebar_rows(&self) -> Vec<SidebarRow> {
         project_rows(
             &self.tab_groups.profile.groups,
@@ -122,16 +267,14 @@ impl NebulaWorkspace {
         if groups.profile.groups.is_empty() {
             return self.tabs.len();
         }
-        let mut has_ungrouped = false;
-        let mut hidden = 0;
-        for meta in &self.tab_meta {
-            match groups.resolve(meta.group_id) {
-                Some(id) if groups.collapsed.contains(&id) => hidden += 1,
-                None => has_ungrouped = true,
-                _ => {},
-            }
-        }
-        self.tabs.len() + groups.profile.groups.len() + usize::from(has_ungrouped) - hidden
+        let hidden = self
+            .tab_meta
+            .iter()
+            .filter(|meta| {
+                groups.resolve(meta.group_id).is_some_and(|id| groups.collapsed.contains(&id))
+            })
+            .count();
+        self.tabs.len() + groups.profile.groups.len() + 1 - hidden
     }
 
     pub(super) fn sidebar_tab_order(&self) -> Vec<usize> {
@@ -145,7 +288,7 @@ impl NebulaWorkspace {
         )
         .into_iter()
         .filter_map(|row| match row {
-            SidebarRow::Tab(ix) => Some(ix),
+            SidebarRow::Tab(ix, _) => Some(ix),
             _ => None,
         })
         .collect()
@@ -158,7 +301,10 @@ impl NebulaWorkspace {
         if let Some(id) = self.tab_meta.get(self.active).and_then(|meta| meta.group_id) {
             self.tab_groups.collapsed.remove(&id);
         }
-        self.sidebar_rows().iter().position(|row| *row == SidebarRow::Tab(self.active)).unwrap_or(0)
+        self.sidebar_rows()
+            .iter()
+            .position(|row| matches!(row, SidebarRow::Tab(ix, _) if *ix == self.active))
+            .unwrap_or(0)
     }
 
     pub(super) fn tab_group_at(&self, ix: usize) -> Option<u64> {
@@ -229,6 +375,7 @@ impl NebulaWorkspace {
         ix: usize,
         width: f32,
         height: f32,
+        drop_target: bool,
         cx: &Context<Self>,
     ) -> AnyElement {
         let group = &self.tab_groups.profile.groups[ix];
@@ -240,18 +387,37 @@ impl NebulaWorkspace {
         let language = crate::gpui_shell::config::ui_language(cx);
         let workspace = cx.entity().downgrade();
         let last = ix + 1 == self.tab_groups.profile.groups.len();
+        let dark = cx.theme().is_dark();
+        let current_color = group.color;
+        let accent = current_color.accent(ix, dark);
+        let tint = accent.opacity(if active { 0.25 } else { 0.12 });
         h_flex()
             .id(("tab-group", ix))
             .w(px(width))
             .h(px(height))
             .items_center()
+            .relative()
             .gap(px(2.0))
+            .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
+            .bg(if drop_target { accent.opacity(0.29) } else { tint })
+            .when(drop_target, |header| {
+                header.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
+                        .border_1()
+                        .border_color(accent),
+                )
+            })
             .child(
                 Button::new(("tab-group-toggle", ix))
                     .ghost()
                     .h_full()
                     .flex_1()
                     .min_w_0()
+                    .pl(px(GROUP_GUIDE_X - 3.0))
+                    .pr_1()
                     .overflow_hidden()
                     .selected(active)
                     .tooltip(group.name.clone())
@@ -259,7 +425,8 @@ impl NebulaWorkspace {
                         h_flex()
                             .w_full()
                             .min_w_0()
-                            .gap_1()
+                            .gap(px(5.0))
+                            .child(div().size(px(8.0)).flex_shrink_0().rounded_full().bg(accent))
                             .child(
                                 Icon::new(if collapsed {
                                     IconName::ChevronRight
@@ -268,7 +435,14 @@ impl NebulaWorkspace {
                                 })
                                 .xsmall(),
                             )
-                            .child(div().flex_1().min_w_0().truncate().child(group.name.clone()))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .font_semibold()
+                                    .truncate()
+                                    .child(group.name.clone()),
+                            )
                             .child(div().flex_shrink_0().text_xs().child(count.to_string())),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -299,7 +473,24 @@ impl NebulaWorkspace {
                     .compact()
                     .icon(IconName::EllipsisVertical)
                     .tooltip(language.text(Message::TabGroupsActions))
-                    .dropdown_menu(move |menu, _, _| {
+                    .dropdown_menu(move |menu, window, cx| {
+                        let color_workspace = workspace.clone();
+                        let menu = menu.submenu(
+                            language.text(Message::TabGroupsColor),
+                            window,
+                            cx,
+                            move |menu, _, _| {
+                                group_color_items(
+                                    menu,
+                                    ix,
+                                    id,
+                                    current_color,
+                                    dark,
+                                    language,
+                                    &color_workspace,
+                                )
+                            },
+                        );
                         [
                             (Message::TabGroupsRename, GroupEdit::Rename(id), false),
                             (Message::TabGroupsMoveUp, GroupEdit::Move(id, -1), ix == 0),
@@ -442,6 +633,30 @@ impl NebulaWorkspace {
     }
 }
 
+fn group_color_items(
+    menu: PopupMenu,
+    index: usize,
+    id: u64,
+    current: GroupColor,
+    dark: bool,
+    language: crate::i18n::UiLanguage,
+    workspace: &gpui::WeakEntity<NebulaWorkspace>,
+) -> PopupMenu {
+    GroupColor::CHOICES.into_iter().fold(menu, |menu, (color, label)| {
+        let workspace = workspace.clone();
+        menu.item(
+            PopupMenuItem::new(language.text(label))
+                .icon(Icon::new(IconName::Palette).text_color(color.accent(index, dark)))
+                .checked(color == current)
+                .on_click(move |_, window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.apply_tab_group_edit(GroupEdit::Color(id, color), "", window, cx);
+                    });
+                }),
+        )
+    })
+}
+
 fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Result<()> {
     let id = match edit {
         GroupEdit::Create => {
@@ -451,14 +666,15 @@ fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Re
             if groups.iter().any(|group| group.id == id) {
                 return Err(io::Error::other("duplicate group id"));
             }
-            groups.push(Group { id, name: name.to_owned() });
+            groups.push(Group { id, name: name.to_owned(), color: GroupColor::Auto });
             return Ok(());
         },
-        GroupEdit::Rename(id) | GroupEdit::Move(id, _) | GroupEdit::Delete(id) => id,
+        GroupEdit::Rename(id) | GroupEdit::Color(id, _) | GroupEdit::Move(id, _) | GroupEdit::Delete(id) => id,
     };
     let Some(ix) = groups.iter().position(|group| group.id == id) else { return Ok(()) };
     match edit {
         GroupEdit::Rename(_) => groups[ix].name = name.to_owned(),
+        GroupEdit::Color(_, color) => groups[ix].color = color,
         GroupEdit::Move(_, delta) => {
             if let Some(to) = ix.checked_add_signed(delta).filter(|&to| to < groups.len()) {
                 groups.swap(ix, to);
@@ -477,22 +693,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn group_color_round_trips_and_old_profiles_default_to_automatic() {
+        let mut groups: Vec<Group> = serde_json::from_str(r#"[{"id":1,"name":"A"}]"#).unwrap();
+        assert_eq!(groups[0].color, GroupColor::Auto);
+        assert_eq!(
+            project_rows(&groups, &HashSet::new(), [Some(1)]),
+            [SidebarRow::Group(0), SidebarRow::Tab(0, Some(0)), SidebarRow::Ungrouped],
+        );
+        update_groups(&mut groups, GroupEdit::Color(1, GroupColor::Purple), "").unwrap();
+        let saved = serde_json::to_string(&groups).unwrap();
+        assert_eq!(serde_json::from_str::<Vec<Group>>(&saved).unwrap()[0].color, GroupColor::Purple);
+        assert_eq!(GroupColor::Purple.accent(0, true), GroupColor::Purple.accent(1, true));
+        update_groups(&mut groups, GroupEdit::Color(1, GroupColor::Auto), "").unwrap();
+        assert!(!serde_json::to_string(&groups).unwrap().contains("color"));
+    }
+
+    #[test]
+    fn group_drop_only_hits_visible_rows_and_skips_gaps() {
+        assert_eq!(drop_row_index(-1.0, 42.0, 34.0, 2), None);
+        assert_eq!(drop_row_index(20.0, 42.0, 34.0, 2), Some(0));
+        assert_eq!(drop_row_index(35.0, 42.0, 34.0, 2), None);
+        assert_eq!(drop_row_index(50.0, 42.0, 34.0, 2), Some(1));
+        assert_eq!(drop_row_index(85.0, 42.0, 34.0, 2), None);
+    }
+
+    #[test]
     fn projected_rows_include_empty_groups_and_keep_orphans_visible() {
-        let mut groups = vec![Group { id: 1, name: "A".into() }, Group { id: 2, name: "B".into() }];
+        let mut groups: Vec<Group> =
+            serde_json::from_str(r#"[{"id":1,"name":"A"},{"id":2,"name":"B"}]"#).unwrap();
         let membership = [None, Some(1), Some(99), Some(1)];
         use SidebarRow::{Group as Header, Tab, Ungrouped};
         assert_eq!(
             project_rows(&groups, &HashSet::new(), membership),
-            [Header(0), Tab(1), Tab(3), Header(1), Ungrouped, Tab(0), Tab(2)]
+            [
+                Header(0),
+                Tab(1, Some(0)),
+                Tab(3, Some(0)),
+                Header(1),
+                Ungrouped,
+                Tab(0, None),
+                Tab(2, None),
+            ]
         );
         assert_eq!(
             project_rows(&groups, &HashSet::from([1]), membership),
-            [Header(0), Header(1), Ungrouped, Tab(0), Tab(2)]
+            [Header(0), Header(1), Ungrouped, Tab(0, None), Tab(2, None)]
         );
         update_groups(&mut groups, GroupEdit::Delete(1), "").unwrap();
         assert_eq!(
             project_rows(&groups, &HashSet::new(), membership),
-            [Header(0), Ungrouped, Tab(0), Tab(1), Tab(2), Tab(3)]
+            [Header(0), Ungrouped, Tab(0, None), Tab(1, None), Tab(2, None), Tab(3, None)]
         );
     }
 }

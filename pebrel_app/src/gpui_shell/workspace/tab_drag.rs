@@ -35,6 +35,7 @@ pub(super) struct TabDrag {
     /// 松手瞬间用户可能已经松开 Alt，锁存保证撕出意图不依赖那一刻的修饰键采样。
     pub(super) force_tear_out: bool,
     pub(super) dock: Option<DockTarget>,
+    pub(super) sidebar_group_drop: Option<super::tab_groups::SidebarGroupDrop>,
 }
 
 impl NebulaWorkspace {
@@ -320,6 +321,13 @@ impl NebulaWorkspace {
                     .and_then(|_| self.dock_nav_at(x, y))
             })
             .flatten();
+        let sidebar_group_drop = self.tab_drag.as_ref().and_then(|drag| {
+            if drag.axis != TabDragAxis::Vertical || force_tear_out || dock.is_some() {
+                return None;
+            }
+            let source = drag.cross_window.as_ref()?.source_tab_index(self)?;
+            self.sidebar_group_drop_at(source, x, y)
+        });
         let (before, after) = self.tab_drag.as_ref().map_or((0, 0), |drag| match drag.axis {
             TabDragAxis::Vertical => self.sidebar_drag_range(drag.source),
             TabDragAxis::Horizontal => (drag.source, len.saturating_sub(drag.source + 1)),
@@ -335,8 +343,13 @@ impl NebulaWorkspace {
                 TabDragAxis::Vertical => dy,
                 TabDragAxis::Horizontal => dx,
             };
-            drag.offset = delta.clamp(-(before as f32) * drag.pitch, after as f32 * drag.pitch);
+            drag.offset = if sidebar_group_drop.is_some() {
+                delta
+            } else {
+                delta.clamp(-(before as f32) * drag.pitch, after as f32 * drag.pitch)
+            };
             drag.dock = dock;
+            drag.sidebar_group_drop = sidebar_group_drop;
             cx.notify();
         }
     }
@@ -347,6 +360,10 @@ impl NebulaWorkspace {
         if drag.active {
             if let Some(nav) = drag.dock {
                 self.dock_tab_into_active(drag.source, nav, window, cx);
+            } else if let Some(destination) = drag.sidebar_group_drop {
+                if let Some(source) = drag.cross_window.and_then(|payload| payload.source_tab_index(self)) {
+                    self.drop_tab_in_group(source, destination, window, cx);
+                }
             } else {
                 let target = match drag.axis {
                     TabDragAxis::Vertical => self.sidebar_drag_target(&drag),

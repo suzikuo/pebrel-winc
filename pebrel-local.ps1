@@ -57,8 +57,8 @@ if ($Action -eq 'Run') {
     try {
         $env:PEBREL_CONFIG_DIR = $profileDirectory
         $env:NEBULA_CONFIG_DIR = $profileDirectory
-        Start-Process -FilePath $executable -WorkingDirectory $repo `
-            -ArgumentList "--working-directory `"$repo`""
+        # A command-line directory requests a fresh terminal and skips workspace restore.
+        Start-Process -FilePath $executable -WorkingDirectory $repo
     } finally {
         $env:PEBREL_CONFIG_DIR = $previousPebrelDirectory
         $env:NEBULA_CONFIG_DIR = $previousNebulaDirectory

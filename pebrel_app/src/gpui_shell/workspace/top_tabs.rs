@@ -324,6 +324,7 @@ impl NebulaWorkspace {
                                 active: false,
                                 force_tear_out: false,
                                 dock: None,
+                                sidebar_group_drop: None,
                             });
                         }),
                     )
