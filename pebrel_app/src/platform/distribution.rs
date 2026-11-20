@@ -1,9 +1,10 @@
 //! 安装渠道只控制应用自更新，不改变用户设置、插件或终端热路径。
 use std::sync::OnceLock;
 
-// Self-built products have no updater. The existing debug acceptance build
-// still exercises the updater against its fixture source.
-pub(crate) const UPDATES_ENABLED: bool = cfg!(feature = "update-test-source");
+// This fork publishes Windows x64 packages. The debug acceptance feature also
+// exercises the updater on other platforms with an isolated fixture.
+pub(crate) const UPDATES_ENABLED: bool =
+    cfg!(all(windows, target_arch = "x86_64")) || cfg!(feature = "update-test-source");
 const UPDATES_DISABLED: &str = "Application updates are disabled in this build.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,8 +112,8 @@ fn from_windows_directory(executable: &std::path::Path) -> Distribution {
     let file = match std::fs::File::open(marker) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return if super::update_installation::windows_installation_directory(executable)
-                .is_some()
+            return if cfg!(any(test, feature = "update-test-source"))
+                && super::update_installation::windows_installation_directory(executable).is_some()
             {
                 Distribution::Direct
             } else {
@@ -125,16 +126,23 @@ fn from_windows_directory(executable: &std::path::Path) -> Distribution {
     if file.take(33).read_to_end(&mut bytes).is_err() {
         return Distribution::Unrecognized;
     }
-    parse_marker(&bytes)
+    let channel = parse_marker(&bytes);
+    if channel == Distribution::Direct
+        && super::update_installation::windows_installation_directory(executable).is_none()
+    {
+        Distribution::Unrecognized
+    } else {
+        channel
+    }
 }
 
 #[cfg(any(windows, test))]
 fn parse_marker(bytes: &[u8]) -> Distribution {
-    if bytes.len() <= 32 && bytes.trim_ascii() == b"scoop" {
-        Distribution::Scoop
-    } else {
-        // 未知/损坏标记不得悄悄切回普通安装器；标记只收窄更新能力。
-        Distribution::Unrecognized
+    match (bytes.len() <= 32).then(|| bytes.trim_ascii()) {
+        Some(b"winc") => Distribution::Direct,
+        Some(b"scoop") => Distribution::Scoop,
+        // 未知/损坏标记不得悄悄切回普通安装器。
+        _ => Distribution::Unrecognized,
     }
 }
 
@@ -180,11 +188,14 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "update-test-source"))]
     #[test]
-    fn self_built_app_refuses_release_checks_and_installation() {
-        assert_eq!(require_release_check(), Err(UPDATES_DISABLED.into()));
-        assert_eq!(require_direct_update(), Err(UPDATES_DISABLED.into()));
+    fn fork_marker_requires_an_installer_layout() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("pebrel.exe");
+        std::fs::write(root.path().join("pebrel-distribution"), "winc\n").unwrap();
+        assert_eq!(from_windows_directory(&executable), Distribution::Unrecognized);
+        std::fs::write(root.path().join("unins000.exe"), b"fixture").unwrap();
+        assert_eq!(from_windows_directory(&executable), Distribution::Direct);
     }
 
     #[cfg(windows)]
@@ -214,7 +225,7 @@ mod tests {
                 let asset = crate::update_check::UpdateAsset {
                     version: version.into(),
                     download_url: format!(
-                        "https://github.com/Kuddev/pebrel/releases/download/v{version}/{name}"
+                        "https://github.com/suzikuo/pebrel-winc/releases/download/winc-v{version}/{name}"
                     ),
                     name,
                     size: Some(42),

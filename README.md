@@ -34,7 +34,9 @@
 
 ---
 
-> **Pebrel Winc fork (2026-11-20).** This unofficial build modifies [Kuddev/pebrel](https://github.com/Kuddev/pebrel) and is distributed under [GPL-3.0](LICENSE). It adds user-approved Windows and WSL directory launchers for plugins such as Winc, manual sidebar tab groups, and a Windows build menu. Application update checks are disabled. On Windows, open `Pebrel-Menu.cmd` to build or launch it. The Winc plugin is installed separately.
+> **Pebrel Winc fork (2026-11-20).** This unofficial build modifies [Kuddev/pebrel](https://github.com/Kuddev/pebrel) and is distributed under [GPL-3.0](LICENSE). It adds Windows and WSL directory launchers for approved plugins, sidebar tab groups, and a Windows build menu. The Winc plugin is installed separately.
+>
+> Windows x64 checks [this fork’s Releases](https://github.com/suzikuo/pebrel-winc/releases) for updates. The installer supports in-app updates. Portable builds link to the new ZIP. Use `Pebrel-Menu.cmd` to build, launch, or publish. See the [Windows publishing steps](README.zh-CN.md#发布-windows-版本).
 
 <p align="center">
   <img src="docs/screenshots/nebula-top-tabs.png" alt="Terminal tabs in Pebrel" width="1040" />

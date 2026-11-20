@@ -6,25 +6,26 @@ use std::time::Duration;
 
 use ureq::ResponseExt as _;
 
-use super::LatestRelease;
+use super::{LatestRelease, RELEASES_PAGE, release_download_url};
 use crate::i18n::{LanguagePreference, Message};
 
-const LATEST_PAGE: &str = "https://github.com/Kuddev/pebrel/releases/latest";
-const TAG_PREFIX: &str = "https://github.com/Kuddev/pebrel/releases/tag/";
+#[cfg(test)]
+const TAG_PREFIX: &str = "https://github.com/suzikuo/pebrel-winc/releases/tag/";
 
 pub(super) fn fetch_latest(status: u16) -> Result<LatestRelease, String> {
-    log::info!("update-check: API returned HTTP {status}; checking official latest-release page");
+    let latest_page = format!("{RELEASES_PAGE}/latest");
+    log::info!("update-check: API returned HTTP {status}; checking fork latest-release page");
     // Resolve proxy settings for github.com independently of api.github.com.
     let language =
         LanguagePreference::from(pebrel_settings::RuntimeSettings::load().language).resolved();
     let agent =
-        crate::update_proxy::agent(LATEST_PAGE, Duration::from_secs(10)).map_err(|error| {
+        crate::update_proxy::agent(&latest_page, Duration::from_secs(10)).map_err(|error| {
             language.format(
                 Message::UpdateCheckFallbackFailed,
                 &[("status", &status.to_string()), ("error", &error.to_string())],
             )
         })?;
-    let uri = redirected_uri(&agent, LATEST_PAGE).map_err(|error| {
+    let uri = redirected_uri(&agent, &latest_page).map_err(|error| {
         language.format(
             Message::UpdateCheckFallbackFailed,
             &[("status", &status.to_string()), ("error", &error.to_string())],
@@ -34,10 +35,7 @@ pub(super) fn fetch_latest(status: u16) -> Result<LatestRelease, String> {
         .ok_or_else(|| language.text(Message::UpdateCheckUnrecognizedRelease).to_owned())?;
     // The official manifest restores verified download metadata during API limits.
     // If it is unavailable, version discovery still works with manual download.
-    let url = format!(
-        "https://github.com/Kuddev/pebrel/releases/download/v{}/SHA256SUMS",
-        release.version
-    );
+    let url = release_download_url(&release.version, "SHA256SUMS");
     let agent = crate::update_proxy::agent(&url, Duration::from_secs(10));
     Ok(with_checksums(release, &url, agent))
 }
@@ -74,7 +72,7 @@ fn redirected_uri(agent: &ureq::Agent, url: &str) -> Result<String, ureq::Error>
 }
 
 fn release_from_uri(uri: &str) -> Option<LatestRelease> {
-    let tag = uri.strip_prefix(TAG_PREFIX)?;
+    let tag = uri.strip_prefix(RELEASES_PAGE)?.strip_prefix("/tag/")?;
     // Official stable releases use major.minor.patch. Reject login pages,
     // arbitrary tags, extra path/query/fragment components and preview tags.
     let version = super::stable_version_from_tag(tag)?;
@@ -88,7 +86,7 @@ mod tests {
 
     #[test]
     fn unavailable_optional_manifest_keeps_the_discovered_version_for_manual_download() {
-        let discovered = || release_from_uri(&format!("{TAG_PREFIX}v1.9.0")).unwrap();
+        let discovered = || release_from_uri(&format!("{TAG_PREFIX}winc-v1.9.0")).unwrap();
         let release = with_checksums(
             discovered(),
             "http://checksums.update.invalid/SHA256SUMS",
@@ -117,7 +115,7 @@ mod tests {
                 "http://api.update.invalid/latest",
                 |code| {
                     assert!(matches!(code, 403 | 429));
-                    Ok(release_from_uri(&format!("{TAG_PREFIX}v1.9.0")).unwrap())
+                    Ok(release_from_uri(&format!("{TAG_PREFIX}winc-v1.9.0")).unwrap())
                 },
             )
             .unwrap();
@@ -131,7 +129,7 @@ mod tests {
     #[test]
     fn successful_api_and_other_errors_never_call_the_fallback() {
         for (status, body, succeeds) in [
-            ("200 OK", r#"{"tag_name":"v1.9.0","assets":[]}"#, true),
+            ("200 OK", r#"{"tag_name":"winc-v1.9.0","assets":[]}"#, true),
             ("200 OK", "not JSON", false),
             ("404 Not Found", "missing release", false),
             ("500 Internal Server Error", "server error", false),
@@ -162,40 +160,43 @@ mod tests {
     #[test]
     fn redirect_transport_uses_the_final_location_without_parsing_html() {
         // The local CONNECT fixture uses HTTP; production agent requires HTTPS.
-        let destination = "http://github.com/Kuddev/pebrel/releases/tag/v1.9.0";
+        let destination = "http://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0";
         let server = Server::start(vec![
             response("302 Found", &format!("Location: {destination}\r\n"), ""),
             response("200 OK", "Content-Type: text/html\r\n", "<html>no metadata</html>"),
         ]);
         let uri =
-            redirected_uri(&server.agent(&[]), "http://github.com/Kuddev/pebrel/releases/latest")
+            redirected_uri(&server.agent(&[]), "http://github.com/suzikuo/pebrel-winc/releases/latest")
                 .unwrap();
         assert_eq!(uri, destination);
         let requests = server.finish();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].1.contains("/releases/latest"));
-        assert!(requests[1].1.contains("/releases/tag/v1.9.0"));
+        assert!(requests[1].1.contains("/releases/tag/winc-v1.9.0"));
     }
 
     #[test]
-    fn only_exact_official_stable_tag_locations_are_accepted() {
-        for tag in ["v1.9.0", "V1.9.0", "1.9.0"] {
-            assert_eq!(release_from_uri(&format!("{TAG_PREFIX}{tag}")).unwrap().version, "1.9.0");
-        }
+    fn only_exact_fork_stable_tag_locations_are_accepted() {
+        assert_eq!(
+            release_from_uri(&format!("{TAG_PREFIX}winc-v1.9.0")).unwrap().version,
+            "1.9.0"
+        );
         for uri in [
-            LATEST_PAGE,
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/v1.9.0",
+            "https://github.com/Kuddev/pebrel/releases/tag/winc-v1.9.0",
+            "https://github.com/suzikuo/pebrel-winc/releases/latest",
             "https://github.com/login",
-            "https://github.com/Other/pebrel/releases/tag/v99.0.0",
-            "http://github.com/Kuddev/pebrel/releases/tag/v1.9.0",
-            "https://github.com.evil.invalid/Kuddev/pebrel/releases/tag/v1.9.0",
-            "https://github.com/Kuddev/pebrel/releases/tag/v1.9.0?foo=bar",
-            "https://github.com/Kuddev/pebrel/releases/tag/v1.9.0#fragment",
-            "https://github.com/Kuddev/pebrel/releases/tag/v1.9.0/extra",
-            "https://github.com/Kuddev/pebrel/releases/tag/v1.9.0-rc1",
-            "https://github.com/Kuddev/pebrel/releases/tag/relay-abcd",
-            "https://github.com/Kuddev/pebrel/releases/tag/v1..0",
-            "https://github.com/Kuddev/pebrel/releases/tag/v01.9.0",
-            "https://github.com/Kuddev/pebrel/releases/tag/v18446744073709551616.0.0",
+            "https://github.com/Other/pebrel/releases/tag/winc-v99.0.0",
+            "http://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0",
+            "https://github.com.evil.invalid/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0?foo=bar",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0#fragment",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0/extra",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1.9.0-rc1",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/relay-abcd",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v1..0",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v01.9.0",
+            "https://github.com/suzikuo/pebrel-winc/releases/tag/winc-v18446744073709551616.0.0",
         ] {
             assert!(release_from_uri(uri).is_none(), "{uri}");
         }

@@ -80,7 +80,7 @@ switch ($Action) {
             -OutputDirectory $outputDirectory -Architecture x64 -Force:$Force
     }
     'Installer' {
-        & (Join-Path $scripts 'build-installer.ps1') -TargetDirectory $targetDirectory `
+        & (Join-Path $scripts 'build-installer.ps1') -WincInstall -TargetDirectory $targetDirectory `
             -OutputDirectory $outputDirectory -Architecture x64 -Force:$Force
     }
     'Debug' {

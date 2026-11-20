@@ -1,7 +1,7 @@
 //! Exact package names shared by release discovery and download validation.
 use super::{
     GitHubReleaseAsset, UpdateAsset, checksum_from_release_body, normalize_sha256,
-    stable_version_from_tag,
+    release_download_url, stable_version_from_tag,
 };
 use crate::platform::Platform;
 
@@ -45,7 +45,7 @@ fn windows_zip(tag: &str, architecture: &str) -> Option<(String, String)> {
         _ => return None,
     };
     let name = format!("Pebrel-v{version}-windows-{architecture}.zip");
-    let url = format!("https://github.com/Kuddev/pebrel/releases/download/{tag}/{name}");
+    let url = release_download_url(version, &name);
     Some((name, url))
 }
 
@@ -66,7 +66,7 @@ pub(super) fn portable_from_checksums(
     architecture: &str,
     text: &str,
 ) -> Option<String> {
-    let (name, url) = windows_zip(&format!("v{version}"), architecture)?;
+    let (name, url) = windows_zip(&format!("winc-v{version}"), architecture)?;
     manifest_hash(text, &name).map(|_| url)
 }
 
@@ -96,9 +96,7 @@ pub(super) fn from_checksums(version: &str, text: &str) -> Option<UpdateAsset> {
         Some(UpdateAsset {
             version: version.into(),
             name: name.clone(),
-            download_url: format!(
-                "https://github.com/Kuddev/pebrel/releases/download/v{version}/{name}"
-            ),
+            download_url: release_download_url(version, name),
             size: None,
             sha256: Some(sha256),
         })
@@ -180,7 +178,7 @@ mod tests {
         assert_eq!(
             portable_from_checksums("2.5.3", "aarch64", &entry).as_deref(),
             Some(
-                "https://github.com/Kuddev/pebrel/releases/download/v2.5.3/Pebrel-v2.5.3-windows-arm64.zip"
+                "https://github.com/suzikuo/pebrel-winc/releases/download/winc-v2.5.3/Pebrel-v2.5.3-windows-arm64.zip"
             ),
         );
         assert!(portable_from_checksums("2.5.3", "x86_64", &entry).is_none());
@@ -191,6 +189,6 @@ mod tests {
         assert!(
             portable_from_checksums("2.5.3", "aarch64", &format!("{entry}bad  {zip}")).is_none()
         );
-        assert!(windows_zip("v2.5.3#fragment", "aarch64").is_none());
+        assert!(windows_zip("winc-v2.5.3#fragment", "aarch64").is_none());
     }
 }

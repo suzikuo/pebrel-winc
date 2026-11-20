@@ -28,16 +28,29 @@
 AppId={{76B778B5-76C6-4F60-9431-9E67C2A351AF}
 AppName=Pebrel Update Acceptance
 AppVerName=Pebrel Update Acceptance {#AppVersion}
+#elif defined(WincInstall)
+AppId={{BB3D5567-98E0-4AFC-BE0E-588E77A35D19}
+AppName=Pebrel Winc
+AppVerName=Pebrel Winc {#AppVersion}
 #else
 AppId={{61022144-7D0A-4E54-94F2-C329A8F58656}
 AppName=Pebrel
 AppVerName=Pebrel {#AppVersion}
 #endif
 AppVersion={#AppVersion}
+#ifdef WincInstall
+AppPublisher=suzikuo
+AppPublisherURL=https://github.com/suzikuo/pebrel-winc
+AppSupportURL=https://github.com/suzikuo/pebrel-winc
+AppUpdatesURL=https://github.com/suzikuo/pebrel-winc/releases
+DefaultGroupName=Pebrel Winc
+#else
 AppPublisher=Kuddev
 AppPublisherURL=https://github.com/Kuddev/pebrel
 AppSupportURL=https://github.com/Kuddev/pebrel/issues
 AppUpdatesURL=https://github.com/Kuddev/pebrel/releases
+DefaultGroupName=Pebrel
+#endif
 VersionInfoVersion={#NumericVersion}
 VersionInfoTextVersion={#AppVersion}
 VersionInfoCompany=Kuddev
@@ -47,7 +60,6 @@ VersionInfoProductVersion={#NumericVersion}
 VersionInfoProductTextVersion={#AppVersion}
 DefaultDirName={code:DefaultInstallDir}
 UsePreviousAppDir=yes
-DefaultGroupName=Pebrel
 UsePreviousGroup=no
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
@@ -114,12 +126,17 @@ chinesesimplified.RemovePathFailed=无法从 PATH 中移除 Pebrel 安装目录�
 [Tasks]
 #ifndef AcceptanceFixture
 Name: "installfont"; Description: "{cm:InstallFont}"
+#ifndef WincInstall
 Name: "addtopath"; Description: "{cm:AddToPath}"
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 #endif
+#endif
 
 [Files]
+#ifdef WincInstall
+Source: "pebrel-distribution-winc"; DestDir: "{app}"; DestName: "pebrel-distribution"; Flags: ignoreversion
+#endif
 Source: "{#BuildRoot}\pebrel-cli.exe"; DestDir: "{app}"; DestName: "pebrel.com"; Flags: ignoreversion
 Source: "{#BuildRoot}\pebrel.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -144,7 +161,10 @@ Source: "{#RepoRoot}\licenses\LICENSE-MLUA"; DestDir: "{app}\licenses"; Flags: i
 Source: "{#RepoRoot}\THIRD-PARTY-NOTICES"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
-#ifndef AcceptanceFixture
+#ifdef WincInstall
+Name: "{group}\Pebrel Winc"; Filename: "{app}\pebrel.exe"; Parameters: "--gpui"; WorkingDir: "{%USERPROFILE}"
+Name: "{group}\Uninstall Pebrel Winc"; Filename: "{uninstallexe}"
+#elif !defined(AcceptanceFixture)
 Name: "{group}\Pebrel"; Filename: "{app}\pebrel.exe"; Parameters: "--gpui"; WorkingDir: "{%USERPROFILE}"; AppUserModelID: "com.pebrel.terminal"
 Name: "{group}\{cm:UninstallProgram}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Pebrel"; Filename: "{app}\pebrel.exe"; Parameters: "--gpui"; WorkingDir: "{%USERPROFILE}"; AppUserModelID: "com.pebrel.terminal"; Tasks: desktopicon
@@ -152,7 +172,7 @@ Name: "{userstartup}\Pebrel"; Filename: "{app}\pebrel.exe"; Parameters: "--gpui 
 #endif
 
 [Registry]
-#ifndef AcceptanceFixture
+#if !defined(AcceptanceFixture) && !defined(WincInstall)
 Root: HKCU; Subkey: "Software\Pebrel"; ValueType: dword; ValueName: "InstallerAddedToPath"; ValueData: "1"; Tasks: addtopath; Check: NeedsAddToPath; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddToPath; Flags: preservestringtype
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\pebrel.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\pebrel.exe"; Flags: uninsdeletekey
@@ -171,14 +191,31 @@ Root: HKCU; Subkey: "Software\Classes\Directory\shell\Pebrel\command"; ValueType
 Filename: "{app}\pebrel.exe"; Parameters: "{code:PebrelLaunchParameters}"; Description: "{cm:LaunchProgram}"; WorkingDir: "{%USERPROFILE}"; Flags: nowait postinstall skipifsilent; AfterInstall: RestorePebrelLaunchEnvironment
 
 [UninstallRun]
-#ifndef AcceptanceFixture
+#if !defined(AcceptanceFixture) && !defined(WincInstall)
 ; 必须在 Inno 删除 pebrel.exe 前调用应用自己的结构化清理逻辑，避免直接改写用户配置。
 Filename: "{app}\pebrel.exe"; Parameters: "setup-ai --remove"; WorkingDir: "{app}"; RunOnceId: "RemovePebrelAiHooks"; Flags: runhidden skipifdoesntexist
 #endif
 
 [Code]
-#include "installer-migration.iss"
 #include "installer-launch.iss"
+#ifdef WincInstall
+function DefaultInstallDir(Param: string): string;
+begin
+  Result := ExpandConstant('{localappdata}\Programs\Pebrel Winc');
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Marker: AnsiString;
+begin
+  Result := '';
+  if FileExists(ExpandConstant('{app}\pebrel.exe')) and
+    (not LoadStringFromFile(ExpandConstant('{app}\pebrel-distribution'), Marker) or
+    (Trim(String(Marker)) <> 'winc')) then
+    Result := 'Choose a separate directory for Pebrel Winc. This directory contains another Pebrel build.';
+end;
+#else
+#include "installer-migration.iss"
 
 function NeedsAddToPath: Boolean;
 var
@@ -214,4 +251,5 @@ begin
     RaiseException(CustomMessage('RemovePathFailed'));
   RegDeleteKeyIfEmpty(HKCU, 'Software\Pebrel');
 end;
+#endif
 #endif

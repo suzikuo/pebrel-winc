@@ -143,8 +143,8 @@ class PebrelBrandingTests(unittest.TestCase):
 
     def test_current_changelog_matches_bilingual_release_notes(self):
         version = self.manifest("pebrel_app/Cargo.toml")["package"]["version"]
-        notes = self.source(f"docs/release-notes/v{version}.md")
-        self.assertTrue(notes.startswith(f"# Pebrel {version}\n"))
+        notes = self.source(f"docs/release-notes/winc-v{version}.md")
+        self.assertTrue(notes.startswith(f"# Pebrel Winc {version}\n"))
         body = notes.split("## English\n", 1)[1].split("## SHA256", 1)[0]
         expected = re.sub(r"^##(?=#* )", "###", "## English\n" + body, flags=re.MULTILINE)
         changelog = self.source("CHANGELOG.md")

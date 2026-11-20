@@ -5,21 +5,16 @@
 //! GitHub outage all degrade to "no banner", never to an error the user sees.
 
 use std::sync::Mutex;
-#[cfg(feature = "update-test-source")]
+#[cfg(any(feature = "gpui-shell", feature = "legacy-shell"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
-use winit::event_loop::EventLoopProxy;
-
-#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
-use crate::event::{Event, EventType};
-#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
+#[cfg(feature = "legacy-shell")]
 use crate::message_bar::{Message, MessageType};
 
-const RELEASES_API: &str = "https://api.github.com/repos/Kuddev/pebrel/releases/latest";
-pub const RELEASES_PAGE: &str = "https://github.com/Kuddev/pebrel/releases";
+const RELEASES_API: &str = "https://api.github.com/repos/suzikuo/pebrel-winc/releases/latest";
+pub const RELEASES_PAGE: &str = "https://github.com/suzikuo/pebrel-winc/releases";
 const UPDATE_STATE_FILE: &str = "update_state.json";
 const REMIND_LATER_SECS: u64 = 3 * 24 * 60 * 60;
 
@@ -174,12 +169,15 @@ struct GitHubReleaseAsset {
     digest: Option<String>,
 }
 
-/// Kick off the once-per-process background check. The result (if any)
-/// arrives as a regular [`EventType::Message`] banner, which the message bar
-/// already knows how to display, deduplicate and dismiss.
-#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
-pub fn spawn_once(proxy: EventLoopProxy<Event>) {
-    if crate::platform::distribution::require_release_check().is_err() {
+/// Kick off the once-per-process background check. The legacy shell displays
+/// the result in its message bar.
+#[cfg(feature = "legacy-shell")]
+pub fn spawn_once(proxy: winit::event_loop::EventLoopProxy<crate::event::Event>) {
+    use crate::event::{Event, EventType};
+
+    if crate::platform::distribution::require_release_check().is_err()
+        || !pebrel_settings::RuntimeSettings::load().auto_check_updates
+    {
         return;
     }
     static STARTED: AtomicBool = AtomicBool::new(false);
@@ -215,7 +213,7 @@ pub fn spawn_once(proxy: EventLoopProxy<Event>) {
 
 /// GPUI 主壳使用自己的事件循环；检查结果进入现有 shell event pump，先显示
 /// 轻通知，再由用户决定是否打开更新详情弹窗。
-#[cfg(feature = "update-test-source")]
+#[cfg(feature = "gpui-shell")]
 pub fn spawn_gpui_once(sender: std::sync::mpsc::Sender<crate::gpui_shell::GpuiShellEvent>) {
     if crate::platform::distribution::require_release_check().is_err() {
         return;
@@ -388,11 +386,9 @@ fn parse_latest_release(bytes: &[u8]) -> Result<LatestRelease, String> {
 fn decode_release(bytes: &[u8]) -> Result<(GitHubRelease, String), String> {
     let release: GitHubRelease =
         serde_json::from_slice(bytes).map_err(|error| format!("GitHub 返回了无效数据：{error}"))?;
-    let version = release.tag_name.trim().trim_start_matches(['v', 'V']);
-    if version.is_empty() {
-        return Err("GitHub release 的版本号为空".to_owned());
-    }
-    let version = version.to_owned();
+    let version = stable_version_from_tag(&release.tag_name)
+        .ok_or_else(|| "GitHub release 必须使用 winc-vX.Y.Z 版本标签".to_owned())?
+        .to_owned();
     Ok((release, version))
 }
 
@@ -416,19 +412,27 @@ fn select_release(
 
 /// Only a stable, numeric release tag may supply a path component for a link.
 fn stable_version_from_tag(tag: &str) -> Option<&str> {
-    let version = tag.strip_prefix(['v', 'V']).unwrap_or(tag);
+    let version = tag.strip_prefix("winc-v")?;
+    stable_version(version).then_some(version)
+}
+
+pub(crate) fn stable_version(version: &str) -> bool {
     let mut components = version.split('.');
     for _ in 0..3 {
-        let part = components.next()?;
+        let Some(part) = components.next() else { return false };
         if part.is_empty()
             || !part.bytes().all(|byte| byte.is_ascii_digit())
             || part.parse::<u64>().is_err()
             || (part.len() > 1 && part.starts_with('0'))
         {
-            return None;
+            return false;
         }
     }
-    components.next().is_none().then_some(version)
+    components.next().is_none()
+}
+
+pub(crate) fn release_download_url(version: &str, name: &str) -> String {
+    format!("{RELEASES_PAGE}/download/winc-v{version}/{name}")
 }
 
 pub(crate) fn windows_x64_installer_names(version: &str) -> [String; 3] {
@@ -509,7 +513,7 @@ mod tests {
         let server = Server::start(vec![response(
             "200 OK",
             "Content-Type: application/json\r\n",
-            r#"{"tag_name":"v1.7.0","assets":[]}"#,
+            r#"{"tag_name":"winc-v1.7.0","assets":[]}"#,
         )]);
         let result = super::fetch_release_with_agent(
             &server.network_agent("http", None, &[]),
@@ -534,7 +538,7 @@ mod tests {
         use serde_json::json;
 
         let version = "99.0.0";
-        let base = format!("https://github.com/Kuddev/pebrel/releases/download/v{version}");
+        let base = format!("https://github.com/suzikuo/pebrel-winc/releases/download/winc-v{version}");
         let names = ["x64.zip", "arm64.zip", "x64-setup.exe", "arm64-setup.exe"];
         let assets: Vec<_> = names
             .iter()
@@ -546,7 +550,7 @@ mod tests {
             .collect();
         let release = |architecture: &str, assets: &[serde_json::Value]| {
             let (release, version) = decode_release(
-                &serde_json::to_vec(&json!({"tag_name": format!("v{version}"), "assets": assets}))
+                &serde_json::to_vec(&json!({"tag_name": format!("winc-v{version}"), "assets": assets}))
                     .unwrap(),
             )
             .unwrap();
@@ -636,7 +640,7 @@ mod tests {
     #[cfg(all(windows, target_arch = "x86_64"))]
     fn release_parser_selects_only_the_exact_windows_installer() {
         let json = br#"{
-            "tag_name": "v1.4.0",
+            "tag_name": "winc-v1.4.0",
             "body": "",
             "assets": [
                 {
@@ -647,7 +651,7 @@ mod tests {
                 },
                 {
                     "name": "NebulaTerminal-1.4.0-windows-x64-setup.exe",
-                    "browser_download_url": "https://github.com/Kuddev/nebula/releases/download/v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe",
+                    "browser_download_url": "https://github.com/suzikuo/pebrel-winc/releases/download/winc-v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe",
                     "size": 42,
                     "digest": "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
                 }
@@ -682,9 +686,7 @@ mod tests {
     fn release_asset(name: &str) -> GitHubReleaseAsset {
         GitHubReleaseAsset {
             name: name.to_owned(),
-            browser_download_url: format!(
-                "https://github.com/Kuddev/nebula/releases/download/v1.6.0/{name}"
-            ),
+            browser_download_url: super::release_download_url("1.6.0", name),
             size: 42,
             digest: Some(format!("sha256:{}", "a".repeat(64))),
         }
@@ -734,10 +736,10 @@ mod tests {
             return;
         }
         let json = serde_json::json!({
-            "tag_name": "v1.6.0",
+            "tag_name": "winc-v1.6.0",
             "assets": [{
                 "name": "Pebrel-1.6.0-windows-x64-setup.exe",
-                "browser_download_url": "https://github.com/Kuddev/nebula/releases/download/v1.6.0/Pebrel-1.6.0-windows-x64-setup.exe",
+                "browser_download_url": "https://github.com/suzikuo/pebrel-winc/releases/download/winc-v1.6.0/Pebrel-1.6.0-windows-x64-setup.exe",
                 "size": 42,
                 "digest": format!("sha256:{}", "a".repeat(64)),
             }],
@@ -748,7 +750,7 @@ mod tests {
 
     #[test]
     fn release_parser_accepts_a_null_release_body() {
-        let json = br#"{"tag_name":"v1.4.0","body":null,"assets":[]}"#;
+        let json = br#"{"tag_name":"winc-v1.4.0","body":null,"assets":[]}"#;
         let release = parse_latest_release(json).expect("nullable GitHub release body");
 
         assert_eq!(release.version, "1.4.0");

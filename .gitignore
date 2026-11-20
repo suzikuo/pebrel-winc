@@ -44,6 +44,7 @@ assets/windows/conhost/
 !/docs/release-notes/
 !/docs/release-notes/AGENTS.md
 !/docs/release-notes/v[0-9]*.md
+!/docs/release-notes/winc-v[0-9]*.md
 !/docs/screenshots/
 !/docs/screenshots/SHOTLIST.md
 !/docs/screenshots/*.png

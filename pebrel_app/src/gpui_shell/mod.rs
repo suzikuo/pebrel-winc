@@ -76,7 +76,6 @@ pub(crate) enum GpuiShellEvent {
     TrayQuit,
     MuxAttach,
     RuntimeControl(std::sync::Arc<crate::runtime_api::RuntimeDispatch>),
-    #[cfg(feature = "update-test-source")]
     UpdateAvailable(crate::update_check::UpdateCheckResult),
     SshPrompt(std::sync::Arc<crate::ssh_prompt::Prompt>),
     OpenDirectories(Vec<String>),
@@ -172,7 +171,6 @@ pub fn run_shell(
         let sender = shell_tx.clone();
         move |request| sender.send(GpuiShellEvent::SshPrompt(request)).is_ok()
     });
-    #[cfg(feature = "update-test-source")]
     crate::update_check::spawn_gpui_once(shell_tx.clone());
     let runtime_hub = crate::runtime_api::RuntimeHub::new();
     crate::tray::init_gpui({

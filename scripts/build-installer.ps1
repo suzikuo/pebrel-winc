@@ -17,6 +17,7 @@ param(
     # 与 -SkipBuild 联用：跳过「exe 必须比源码新」的陈旧检查。仅用于脚本
     # 自测；发布安装包一律走全新构建。
     [switch] $AllowStale,
+    [switch] $WincInstall,
     [switch] $Force,
     [switch] $ValidateOnly,
     [string] $OutputDirectory,
@@ -87,6 +88,24 @@ $requiredFiles = @(
 
 if (-not (Test-Path -LiteralPath $installerScript -PathType Leaf)) {
     throw "Installer definition is missing: $installerScript"
+}
+
+if (-not $ValidateOnly) {
+    if ([string]::IsNullOrWhiteSpace($InnoCompiler)) {
+        $candidates = @(
+            $env:ISCC_PATH,
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $InnoCompiler = $candidates | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        } | Select-Object -First 1
+    }
+    if ([string]::IsNullOrWhiteSpace($InnoCompiler) -or
+        -not (Test-Path -LiteralPath $InnoCompiler -PathType Leaf)) {
+        throw 'ISCC.exe was not found. Install Inno Setup 6 or pass -InnoCompiler / set ISCC_PATH.'
+    }
 }
 
 if (-not $SkipBuild) {
@@ -167,22 +186,6 @@ if (Test-Path -LiteralPath $setupPath) {
 }
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
-if ([string]::IsNullOrWhiteSpace($InnoCompiler)) {
-    $candidates = @(
-        $env:ISCC_PATH,
-        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
-        (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    $InnoCompiler = $candidates | Where-Object {
-        Test-Path -LiteralPath $_ -PathType Leaf
-    } | Select-Object -First 1
-}
-if ([string]::IsNullOrWhiteSpace($InnoCompiler) -or
-    -not (Test-Path -LiteralPath $InnoCompiler -PathType Leaf)) {
-    throw 'ISCC.exe was not found. Install Inno Setup 6 or pass -InnoCompiler / set ISCC_PATH.'
-}
-
 # Inno 的基础安装不内置第三方翻译。固定提交与哈希可以保留中文向导，
 # 同时避免发布构建悄悄接受上游后来被替换的内容。
 $translationValid = $false
@@ -209,9 +212,11 @@ if (-not $translationValid) {
     }
 }
 
+$installerDefines = @()
+if ($WincInstall) { $installerDefines += '/DWincInstall=1' }
 Push-Location $PSScriptRoot
 try {
-    & $InnoCompiler "/DAppVersion=$Version" "/DNumericVersion=$numericVersion" "/DConfiguration=$Configuration" "/DPackageBrand=$PackageBrand" "/DArchitecture=$Architecture" "/DBuildRoot=$targetRoot" "/O$outputRoot" $installerScript
+    & $InnoCompiler @installerDefines "/DAppVersion=$Version" "/DNumericVersion=$numericVersion" "/DConfiguration=$Configuration" "/DPackageBrand=$PackageBrand" "/DArchitecture=$Architecture" "/DBuildRoot=$targetRoot" "/O$outputRoot" $installerScript
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
     }

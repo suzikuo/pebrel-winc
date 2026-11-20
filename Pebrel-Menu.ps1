@@ -9,7 +9,7 @@ $runner = Join-Path $PSScriptRoot 'pebrel-local.ps1'
 function Show-PebrelMenu([string] $Status) {
     $form = New-Object Windows.Forms.Form
     try {
-        $form.Text = 'Pebrel 本地运行与打包'
+        $form.Text = 'Pebrel 本地运行、打包与发布'
         $form.StartPosition = 'CenterScreen'
         $form.AutoScaleMode = 'Dpi'
         $form.AutoSize = $true
@@ -32,6 +32,7 @@ function Show-PebrelMenu([string] $Status) {
             @{ Text = 'Debug 打包（本机使用）'; Action = 'Debug'; Profile = 'debug' }
             @{ Text = 'Release 打包（便携 ZIP）'; Action = 'Release'; Profile = 'release' }
             @{ Text = '生成安装包（需要 Inno Setup 6）'; Action = 'Installer'; Profile = 'release' }
+            @{ Text = '发布到 GitHub Releases（Windows x64）'; Action = 'Publish'; Profile = 'release' }
         )) {
             $button = New-Object Windows.Forms.Button
             $button.Text = $choice.Text
@@ -76,6 +77,18 @@ $status = ''
 while ($selection = Show-PebrelMenu $status) {
     $choice = $selection.Choice
     try {
+        if ($choice.Action -eq 'Publish') {
+            $publisher = Join-Path $PSScriptRoot 'scripts\publish-winc.ps1'
+            $plan = & $publisher -Plan
+            $message = "将把 $($plan.Commit.Substring(0, 12)) 发布为 $($plan.Tag)。`n`n目标仓库 $($plan.Repository)`n产物为 Windows x64 安装包及便携 ZIP。完成后应用可检查到新版。"
+            if ([Windows.Forms.MessageBox]::Show($message, '确认发布', 'OKCancel', 'Warning', 'Button2') -ne 'OK') {
+                continue
+            }
+            $releaseUrl = & $publisher -ExpectedCommit $plan.Commit
+            $status = "发布完成 $($plan.Tag)"
+            [Windows.Forms.MessageBox]::Show("$status`n$releaseUrl", 'Pebrel', 'OK', 'Information') | Out-Null
+            continue
+        }
         & $runner -Action $choice.Action -Profile $choice.Profile -Force:$selection.Force
         if ($choice.Action -eq 'Run') { return }
         $status = '打包完成，产物位于项目的 dist 目录。'

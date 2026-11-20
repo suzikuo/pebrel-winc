@@ -20,6 +20,14 @@ fn override_dir() -> Option<PathBuf> {
     first_override(|name| std::env::var_os(name))
 }
 
+#[cfg(windows)]
+fn winc_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .map_or_else(|| default_dir("PebrelWincNative"), |root| root.join("PebrelWincNative"))
+}
+
 fn default_dir(name: &str) -> PathBuf {
     #[cfg(windows)]
     let root = std::env::var_os("APPDATA")
@@ -49,6 +57,9 @@ fn default_dir(name: &str) -> PathBuf {
 
 /// Pebrel's data directory. The legacy override remains an input alias.
 pub fn settings_dir() -> PathBuf {
+    #[cfg(windows)]
+    return override_dir().unwrap_or_else(winc_dir);
+    #[cfg(not(windows))]
     override_dir().unwrap_or_else(|| default_dir("Pebrel"))
 }
 
@@ -59,6 +70,9 @@ pub fn settings_path() -> PathBuf {
 /// Run at process startup before settings, databases or background tasks open.
 pub fn migrate_legacy_data() -> io::Result<()> {
     let destination = settings_dir();
+    #[cfg(windows)]
+    let source = destination.clone();
+    #[cfg(not(windows))]
     let source = override_dir().unwrap_or_else(|| default_dir("Nebula"));
     migration::migrate_data_at(&source, &destination).map_err(|error| {
         io::Error::new(

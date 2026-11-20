@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for this checkout.
+Superseded by [Windows fork releases and updates](2026-11-20-winc-release-updates.md).
 
 ## Context
 

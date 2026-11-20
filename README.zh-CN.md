@@ -34,7 +34,17 @@
 
 ---
 
-> **Pebrel Winc 自编译分支（2026-11-20）**。此分支基于 Kuddev/pebrel 修改，按 GPL-3.0 发布。双击 `Pebrel-Menu.cmd` 可在 Windows 上构建或启动。此分支增加了经用户授权的 Windows/WSL 插件目录启动按钮和侧栏标签分组，并关闭应用内更新检查。Winc 插件单独安装。 [上游仓库](https://github.com/Kuddev/pebrel) · [许可证](LICENSE)
+> **Pebrel Winc 自编译分支（2026-11-20）**。此分支基于 Kuddev/pebrel 修改，按 GPL-3.0 发布。双击 `Pebrel-Menu.cmd` 可在 Windows 上构建、启动或发布。此分支增加了经用户授权的 Windows/WSL 插件目录启动按钮和侧栏标签分组。Winc 插件单独安装。 [上游仓库](https://github.com/Kuddev/pebrel) · [许可证](LICENSE)
+>
+> Windows x64 版从本 fork 的 Releases 检查更新。安装版支持应用内安装，便携版提供下载新版 ZIP 的入口。[自编译版 Releases](https://github.com/suzikuo/pebrel-winc/releases)
+
+## 发布 Windows 版本
+
+1. 在 `winc-local` 上将 `pebrel_app/Cargo.toml` 中的应用版本及 `Cargo.lock` 中 `pebrel` 的版本改为新的 `X.Y.Z`。同步更新 `CHANGELOG.md` 和 `docs/release-notes/winc-vX.Y.Z.md`。
+2. 提交并推送到 fork 的 `winc-local`。准备好 Windows Rust 工具链和 Inno Setup 6，并用 GitHub CLI 登录有仓库发布权限的账号。
+3. 双击 `Pebrel-Menu.cmd`，选「发布到 GitHub Releases（Windows x64）」并确认版本与提交。菜单会重新构建安装包和 ZIP，在 `dist/winc-vX.Y.Z/` 生成 SHA-256 清单，并验证 GitHub 草稿的资产后发布。
+
+如果上传中断，可在 GitHub 检查并删除此次的草稿，再从同一提交重试。安装包默认安装到 `%LOCALAPPDATA%\Programs\Pebrel Winc`，使用 `%LOCALAPPDATA%\PebrelWincNative` 配置目录。
 
 <p align="center">
   <img src="docs/screenshots/nebula-top-tabs.png" alt="Pebrel 终端标签" width="1040" />

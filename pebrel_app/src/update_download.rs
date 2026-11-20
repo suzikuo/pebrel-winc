@@ -20,8 +20,7 @@ use sha2::{Digest as _, Sha256};
 use crate::i18n::{Message, UiLanguage};
 use crate::update_check::UpdateAsset;
 
-const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/Kuddev/pebrel/releases/download/";
-const LEGACY_RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/Kuddev/nebula/releases/download/";
+use crate::update_check::{release_download_url, stable_version};
 const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 const DOWNLOAD_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -437,22 +436,14 @@ fn validate_windows_asset_contract(asset: &UpdateAsset) -> Result<(), String> {
 }
 
 fn validate_asset_contract(asset: &UpdateAsset, names: &[String]) -> Result<(), String> {
-    if asset.version.is_empty()
-        || !asset
-            .version
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
-    {
+    if !stable_version(&asset.version) {
         return Err("release 版本号不符合安装包命名规则".to_owned());
     }
     if !names.contains(&asset.name) {
         return Err("release 资产不是当前平台的精确安装包".to_owned());
     }
-    let trusted_url = [RELEASE_DOWNLOAD_PREFIX, LEGACY_RELEASE_DOWNLOAD_PREFIX]
-        .iter()
-        .any(|prefix| asset.download_url == format!("{prefix}v{}/{}", asset.version, asset.name));
-    if !trusted_url {
-        return Err("release 安装包 URL 不属于 Pebrel 官方仓库".to_owned());
+    if asset.download_url != release_download_url(&asset.version, &asset.name) {
+        return Err("release 安装包 URL 不属于 Pebrel Winc 更新仓库".to_owned());
     }
     if asset.size.is_some_and(|bytes| bytes == 0 || bytes > MAX_INSTALLER_BYTES) {
         return Err("release 安装包大小无效".to_owned());
@@ -471,7 +462,7 @@ mod tests {
     use sha2::{Digest as _, Sha256};
 
     use super::{
-        LEGACY_RELEASE_DOWNLOAD_PREFIX, MAX_INSTALLER_BYTES, RELEASE_DOWNLOAD_PREFIX, UpdateAsset,
+        MAX_INSTALLER_BYTES, UpdateAsset, release_download_url,
         validate_windows_asset_contract, verify_download,
     };
 
@@ -659,15 +650,15 @@ mod tests {
     }
 
     #[test]
-    fn accepts_exact_official_asset_contract() {
-        let url = "https://github.com/Kuddev/nebula/releases/download/v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe";
+    fn accepts_exact_fork_asset_contract() {
+        let url = "https://github.com/Kuddev/nebula/releases/download/winc-v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe";
         let hash = "a".repeat(64);
         assert!(validate_windows_asset_contract(&asset(url, Some(hash.as_str()))).is_ok());
     }
 
     #[test]
     fn rejects_untrusted_url_or_missing_digest() {
-        let official = "https://github.com/Kuddev/nebula/releases/download/v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe";
+        let official = "https://github.com/Kuddev/nebula/releases/download/winc-v1.4.0/NebulaTerminal-1.4.0-windows-x64-setup.exe";
         let untrusted = "https://example.invalid/NebulaTerminal-1.4.0-windows-x64-setup.exe";
         let hash = "a".repeat(64);
 
@@ -679,7 +670,7 @@ mod tests {
         let name = format!("{brand}-1.6.0-windows-x64-setup.exe");
         UpdateAsset {
             version: "1.6.0".to_owned(),
-            download_url: format!("{RELEASE_DOWNLOAD_PREFIX}v1.6.0/{name}"),
+            download_url: release_download_url("1.6.0", &name),
             name,
             size: Some(42),
             sha256: Some("b".repeat(64)),
@@ -691,17 +682,14 @@ mod tests {
         for brand in ["Pebrel", "NebulaTerminal"] {
             let original = branded_asset(brand);
             assert!(validate_windows_asset_contract(&original).is_ok());
-            let mut legacy_url = original.clone();
-            legacy_url.download_url =
-                format!("{LEGACY_RELEASE_DOWNLOAD_PREFIX}v{}/{}", original.version, original.name);
-            assert!(validate_windows_asset_contract(&legacy_url).is_ok());
             for url in [
-                original.download_url.replace("/v1.6.0/", "/v1.5.0/"),
-                original.download_url.replace("/v1.6.0/", "/v1.6.0/extra/"),
+                original.download_url.replace("/winc-v1.6.0/", "/winc-v1.5.0/"),
+                original.download_url.replace("/winc-v1.6.0/", "/winc-v1.6.0/extra/"),
                 original.download_url.replace("github.com/", "github.com.evil.invalid/"),
                 original.download_url.replace("https://", "http://"),
                 format!("{}?download=1", original.download_url),
-                original.download_url.replace("Kuddev/pebrel/", "elsewhere/pebrel/"),
+                original.download_url.replace("suzikuo/pebrel-winc/", "Kuddev/pebrel/"),
+                original.download_url.replace("/winc-v1.6.0/", "/v1.6.0/"),
             ] {
                 let mut candidate = original.clone();
                 candidate.download_url = url;
@@ -777,7 +765,7 @@ mod macos_package_tests {
         let mut asset = UpdateAsset {
             version: "1.9.1".into(),
             name: names[0].clone(),
-            download_url: format!("{RELEASE_DOWNLOAD_PREFIX}v1.9.1/{}", names[0]),
+            download_url: release_download_url("1.9.1", &names[0]),
             size: Some(bytes.len() as u64),
             sha256: Some(Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect()),
         };

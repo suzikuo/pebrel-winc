@@ -803,7 +803,6 @@ pub(crate) fn dispatch_shell_events(events: Vec<GpuiShellEvent>, cx: &mut App) {
             },
             GpuiShellEvent::RuntimeControl(dispatch) => dispatch_runtime(dispatch, cx),
             GpuiShellEvent::ElevatedLaunch(request) => elevated_launch::dispatch(request, cx),
-            #[cfg(feature = "update-test-source")]
             GpuiShellEvent::UpdateAvailable(result) => {
                 let Some(entry) = entries_by_mru(cx).into_iter().next() else { continue };
                 let _ = entry.handle.update(cx, move |_, window, cx| {

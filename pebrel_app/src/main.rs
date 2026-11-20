@@ -440,7 +440,6 @@ fn nebula(mut options: Options) -> Result<(), Box<dyn Error>> {
     // re-installs them whenever another tool (ccswitch…) rewrites the config.
     // The notify proxy powers toast click-to-focus. See ai_hook / notify.
     notify::init_proxy(window_event_loop.create_proxy());
-    #[cfg(feature = "update-test-source")]
     update_check::spawn_once(window_event_loop.create_proxy());
     #[cfg(windows)]
     let _ai_config_guard = ai_hook::spawn_config_guard();
