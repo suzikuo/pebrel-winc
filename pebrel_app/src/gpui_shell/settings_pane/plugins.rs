@@ -159,7 +159,7 @@ impl SettingsPane {
         let (library, store) = (self.plugins.library(), self.plugins.store());
         self.run_plugin_task(None, cx, move || {
             let result = (|| {
-                let plugin = library.install(&pending.path, &pending.request.requested)?;
+                let plugin = library.install_reviewed(&pending.path, &pending.request)?;
                 let themes = if plugin.grants.contains(&Grant::ThemeLibrary) {
                     themes::install_bundled(&library, &plugin.id, &store)?
                 } else {
@@ -256,6 +256,12 @@ impl SettingsPane {
             let _ = this.update(cx, |this, cx| {
                 if this.plugins.sequence != sequence {
                     return;
+                }
+                #[cfg(windows)]
+                if this.plugins.busy.is_some() {
+                    cx.set_global(
+                        crate::gpui_shell::workspace::plugin_toolbar::PluginLibraryChanged,
+                    );
                 }
                 this.plugins.loading = false;
                 this.plugins.busy = None;

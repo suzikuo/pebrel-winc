@@ -204,12 +204,8 @@ mod tests {
     #[test]
     #[ignore = "contacts public GitHub; run explicitly for native network acceptance"]
     fn live_update_check_survives_api_rate_limiting() {
-        let release = super::super::check_now().expect("live public update check");
-        println!(
-            "current={} latest={} update_available={}",
-            release.current, release.latest, release.update_available
-        );
+        let release = super::super::fetch_latest_release().expect("live public update metadata");
         let fallback = fetch_latest(403).expect("live official release fallback");
-        assert_eq!(release.latest, fallback.version);
+        assert_eq!(release.version, fallback.version);
     }
 }

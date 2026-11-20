@@ -34,6 +34,8 @@
 
 ---
 
+> **Pebrel Winc 自编译分支（2026-11-20）**。此分支基于 Kuddev/pebrel 修改，按 GPL-3.0 发布。双击 `Pebrel-Menu.cmd` 可在 Windows 上构建或启动。此分支增加了经用户授权的 Windows/WSL 插件目录启动按钮和侧栏标签分组，并关闭应用内更新检查。Winc 插件单独安装。 [上游仓库](https://github.com/Kuddev/pebrel) · [许可证](LICENSE)
+
 <p align="center">
   <img src="docs/screenshots/nebula-top-tabs.png" alt="Pebrel 终端标签" width="1040" />
 </p>

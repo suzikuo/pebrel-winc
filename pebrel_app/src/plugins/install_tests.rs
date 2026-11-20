@@ -44,6 +44,87 @@ fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Library) {
     (source, config, library)
 }
 
+const DIRECTORY_LAUNCHER: &str = r#"
+manifest_version = 1
+api_version = 1
+id = "example.directory-launcher"
+name = "Directory Viewer"
+version = "1.0.0"
+
+[[directory_launchers]]
+id = "open-directory"
+title = "Open Directory"
+executable = 'C:\Tools\viewer.exe'
+windows_args = ["--open", "."]
+wsl_args = ["--wsl", "{distribution}", "{directory}"]
+"#;
+
+#[test]
+fn directory_launchers_require_approval_and_reject_changed_arguments() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("plugin.toml"), DIRECTORY_LAUNCHER).unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let root = config.path().join("plugins");
+    let library = Library::new(&root);
+    let id = "example.directory-launcher";
+
+    assert_eq!(library.install(source.path(), &[]).unwrap_err().code, "grant_required");
+    let installed = library.install(source.path(), &[Grant::DirectoryLauncher]).unwrap();
+    assert_eq!(installed.directory_launchers.len(), 1);
+    assert!(installed.theme_commands.is_empty());
+    library.set_enabled(id, false).unwrap();
+    #[cfg(all(windows, feature = "gpui-shell"))]
+    assert_eq!(
+        library
+            .launch_directory(
+                id,
+                &installed.directory_launchers[0],
+                super::directory::Target::Windows(config.path().to_owned()),
+            )
+            .unwrap_err()
+            .code,
+        "plugin_disabled",
+    );
+    library.set_enabled(id, true).unwrap();
+
+    let changed = DIRECTORY_LAUNCHER.replace("--open", "--changed");
+    fs::write(root.join(id).join("plugin.toml"), changed).unwrap();
+    assert_eq!(library.open_enabled(id).unwrap_err().code, "invalid_install");
+    assert_eq!(library.list().unwrap().broken[0].id, id);
+}
+
+#[cfg(feature = "gpui-shell")]
+#[test]
+fn interactive_install_rejects_a_different_launcher_than_the_user_reviewed() {
+    let source = tempfile::tempdir().unwrap();
+    let manifest = source.path().join("plugin.toml");
+    fs::write(&manifest, DIRECTORY_LAUNCHER).unwrap();
+    let reviewed = Library::inspect(source.path()).unwrap();
+    fs::write(&manifest, DIRECTORY_LAUNCHER.replace("viewer.exe", "other.exe")).unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let library = Library::new(config.path().join("plugins"));
+
+    assert_eq!(
+        library.install_reviewed(source.path(), &reviewed).unwrap_err().code,
+        "package_changed"
+    );
+    assert!(library.list().unwrap().plugins.is_empty());
+}
+
+#[test]
+fn malformed_directory_launchers_fail_manifest_checks() {
+    let source = tempfile::tempdir().unwrap();
+    for manifest in [
+        DIRECTORY_LAUNCHER.replace(r"C:\Tools\viewer.exe", "viewer.exe"),
+        DIRECTORY_LAUNCHER.replace("viewer.exe", "viewer.cmd"),
+        DIRECTORY_LAUNCHER.replace("{directory}", "{distribution}"),
+        DIRECTORY_LAUNCHER.replace("{directory}", "--dir={directory}"),
+    ] {
+        fs::write(source.path().join("plugin.toml"), manifest).unwrap();
+        assert_eq!(Library::inspect(source.path()).unwrap_err().code, "invalid_directory_launcher");
+    }
+}
+
 #[test]
 fn install_requires_every_requested_grant_before_touching_the_library() {
     let (source, config, library) = fixture();

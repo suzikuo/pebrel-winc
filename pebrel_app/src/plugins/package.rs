@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::{Error, Result, boundary, json};
+use super::{Error, Result, boundary, directory::Launcher, json};
 
 pub(super) const MAX_MANIFEST_BYTES: usize = 32 * 1024;
 pub(super) const MAX_SOURCE_BYTES: usize = 256 * 1024;
@@ -30,7 +30,10 @@ pub(super) struct Manifest {
     /// grants [`Grant::ThemeLibrary`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub themes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<Command>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directory_launchers: Vec<Launcher>,
 }
 
 /// What a command's result means to the host.
@@ -51,12 +54,15 @@ pub(super) enum Output {
 pub(crate) enum Grant {
     /// Add themes to the user's theme library (never applies them).
     ThemeLibrary,
+    /// Launch the exact reviewed executable and argument templates from the workspace.
+    DirectoryLauncher,
 }
 
 impl Grant {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "theme-library" | "theme_library" => Some(Self::ThemeLibrary),
+            "directory-launcher" | "directory_launcher" => Some(Self::DirectoryLauncher),
             _ => None,
         }
     }
@@ -154,7 +160,14 @@ impl Manifest {
     pub(super) fn requested_grants(&self) -> Vec<Grant> {
         let themes = !self.themes.is_empty()
             || self.commands.iter().any(|command| command.output == Output::Theme);
-        if themes { vec![Grant::ThemeLibrary] } else { Vec::new() }
+        let mut grants = Vec::new();
+        if themes {
+            grants.push(Grant::ThemeLibrary);
+        }
+        if !self.directory_launchers.is_empty() {
+            grants.push(Grant::DirectoryLauncher);
+        }
+        grants
     }
 
     fn validate(&self) -> Result<()> {
@@ -164,11 +177,20 @@ impl Manifest {
         if !identifier(&self.id) || !label(&self.name, 256) || !label(&self.version, 64) {
             return Err(Error::new("invalid_metadata", "invalid id, name, or version"));
         }
-        if self.commands.is_empty() || self.commands.len() > 64 || self.permissions.len() > 32 {
+        let action_count = self.commands.len() + self.directory_launchers.len();
+        if !(1..=64).contains(&action_count) || self.permissions.len() > 32 {
             return Err(Error::new(
                 "manifest_limit",
-                "declare 1..=64 commands and at most 32 permissions",
+                "declare 1..=64 commands and launchers in total and at most 32 permissions",
             ));
+        }
+        for (index, launcher) in self.directory_launchers.iter().enumerate() {
+            launcher.validate()?;
+            if self.directory_launchers[..index].iter().any(|other| other.id == launcher.id)
+                || self.commands.iter().any(|command| command.id == launcher.id)
+            {
+                return Err(Error::new("invalid_directory_launcher", "action IDs must be unique"));
+            }
         }
         if self.permissions.iter().enumerate().any(|(index, method)| {
             !identifier(method)
@@ -256,7 +278,7 @@ pub(super) fn identifier(value: &str) -> bool {
         })
 }
 
-fn label(value: &str, limit: usize) -> bool {
+pub(super) fn label(value: &str, limit: usize) -> bool {
     !value.trim().is_empty() && value.len() <= limit && !value.chars().any(char::is_control)
 }
 

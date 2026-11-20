@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+
+use super::directory::Launcher;
 
 use super::package::{
     Grant, MAX_MANIFEST_BYTES, MAX_SOURCE_BYTES, Output, Package, identifier, package_file,
@@ -25,6 +28,8 @@ struct Receipt {
     version: String,
     enabled: bool,
     grants: Vec<Grant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    directory_approval: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -43,6 +48,8 @@ pub(crate) struct Installed {
     pub bundled_themes: usize,
     /// Commands whose result the host turns into a library theme.
     pub theme_commands: Vec<CommandSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub directory_launchers: Vec<Launcher>,
 }
 
 /// A directory that is not a valid installed plugin; it can still be uninstalled.
@@ -63,6 +70,7 @@ pub(crate) struct Listing {
 pub(crate) struct Request {
     pub name: String,
     pub requested: Vec<Grant>,
+    pub directory_launchers: Vec<Launcher>,
 }
 
 pub(crate) struct Library {
@@ -83,18 +91,34 @@ impl Library {
     /// Read a package's name and requested grants without installing it, so
     /// the user can decide on the grants first.
     pub(crate) fn inspect(source: &Path) -> Result<Request> {
-        let package = Package::open(source)?;
-        Ok(Request {
+        Ok(Self::request(&Package::open(source)?))
+    }
+
+    fn request(package: &Package) -> Request {
+        Request {
             name: package.manifest.name.clone(),
             requested: package.manifest.requested_grants(),
-        })
+            directory_launchers: package.manifest.directory_launchers.clone(),
+        }
+    }
+
+    #[cfg(feature = "gpui-shell")]
+    /// Themes or directory actions contributed by a package are approved at install time.
+    pub(crate) fn install_reviewed(&self, source: &Path, reviewed: &Request) -> Result<Installed> {
+        let package = Package::open(source)?;
+        if Self::request(&package) != *reviewed {
+            return Err(Error::new("package_changed", "select the changed package again"));
+        }
+        self.install_package(package, &reviewed.requested)
     }
 
     /// Copy a checked package into the library, replacing an older install of
-    /// the same ID. Fails before touching the library when `granted` does not
-    /// cover what the manifest requests.
+    /// the same ID. Fails before touching the library when grants are missing.
     pub(crate) fn install(&self, source: &Path, granted: &[Grant]) -> Result<Installed> {
-        let package = Package::open(source)?;
+        self.install_package(Package::open(source)?, granted)
+    }
+
+    fn install_package(&self, package: Package, granted: &[Grant]) -> Result<Installed> {
         let requested = package.manifest.requested_grants();
         let missing: Vec<_> = requested.iter().filter(|grant| !granted.contains(grant)).collect();
         if !missing.is_empty() {
@@ -119,11 +143,19 @@ impl Library {
             copy(&package, theme, stage.path(), MAX_THEME_PACKAGE_BYTES)?;
         }
         super::themes::check_bundled(stage.path(), &manifest.themes)?;
+        let staged = Package::open(stage.path())?;
+        if staged.manifest.id != id
+            || staged.manifest.version != manifest.version
+            || Self::request(&staged) != Self::request(&package)
+        {
+            return Err(Error::new("package_changed", "package changed during installation"));
+        }
         let receipt = Receipt {
             receipt_version: RECEIPT_VERSION,
             version: manifest.version.clone(),
             enabled: true,
             grants: requested,
+            directory_approval: directory_approval(&staged),
         };
         write_receipt(stage.path(), &receipt)?;
         replace_directory(stage.keep(), &root.join(&id))?;
@@ -163,6 +195,7 @@ impl Library {
             enabled: receipt.enabled,
             grants: receipt.grants,
             bundled_themes: manifest.themes.len(),
+            directory_launchers: manifest.directory_launchers.clone(),
             theme_commands: manifest
                 .commands
                 .iter()
@@ -182,6 +215,23 @@ impl Library {
             return Err(Error::new("plugin_disabled", format!("plugin is disabled: {id}")));
         }
         Ok((package, receipt.grants))
+    }
+
+    #[cfg(all(windows, feature = "gpui-shell"))]
+    pub(crate) fn launch_directory(
+        &self,
+        id: &str,
+        selected: &Launcher,
+        target: super::directory::Target,
+    ) -> Result<()> {
+        let root = self.root()?;
+        let _lock = lock(&root)?;
+        let (package, grants) = self.open_enabled(id)?;
+        let launcher = package.manifest.directory_launchers.iter().find(|item| *item == selected);
+        match launcher {
+            Some(launcher) if grants.contains(&Grant::DirectoryLauncher) => launcher.spawn(target),
+            _ => Err(Error::new("launcher_changed", "the approved directory launcher has changed")),
+        }
     }
 
     pub(crate) fn set_enabled(&self, id: &str, enabled: bool) -> Result<Installed> {
@@ -222,6 +272,15 @@ impl Library {
         if receipt.version != package.manifest.version {
             return Err(Error::new("invalid_install", "receipt and manifest versions differ"));
         }
+        if receipt.directory_approval != directory_approval(&package)
+            || (!package.manifest.directory_launchers.is_empty()
+                && !receipt.grants.contains(&Grant::DirectoryLauncher))
+        {
+            return Err(Error::new(
+                "invalid_install",
+                "directory launchers require reinstallation and approval",
+            ));
+        }
         Ok((package, receipt))
     }
 
@@ -232,6 +291,16 @@ impl Library {
         }
         self.root.canonicalize().map_err(io_error)
     }
+}
+
+fn directory_approval(package: &Package) -> Option<String> {
+    let launchers = &package.manifest.directory_launchers;
+    if launchers.is_empty() {
+        return None;
+    }
+    let reviewed = serde_json::to_vec(launchers).expect("launcher declarations are JSON");
+    let digest = Sha256::digest(reviewed);
+    Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn installed_path(root: &Path, id: &str) -> Result<PathBuf> {

@@ -151,6 +151,7 @@ impl WindowContext {
             cwd: pane_cwd(tab.active_pane),
             custom_name: tab.custom_name.clone(),
             color: tab.custom_color,
+            group_id: None,
             launch: Some(Self::launch_session(&tab.launch)),
             layout: Some(Self::layout_session(&tab.layout, &pane_cwd, &pane_agent)),
             active_pane: leaves.iter().position(|id| *id == tab.active_pane).unwrap_or(0),

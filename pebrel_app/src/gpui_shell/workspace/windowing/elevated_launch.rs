@@ -21,6 +21,9 @@ fn open(request: &Request, cx: &mut App) -> Result<(u64, u64), ApiError> {
         return Err(ApiError::new("shutting_down", "the elevated window owner is closing"));
     }
     if let Some(path) = &request.update_restore {
+        if !crate::platform::distribution::UPDATES_ENABLED {
+            return Err(ApiError::new("invalid_update_ticket", "Application updates are disabled"));
+        }
         if !crate::platform::elevation::is_elevated().is_ok_and(|value| value) {
             return Err(ApiError::new(
                 "invalid_update_ticket",

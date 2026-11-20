@@ -120,7 +120,9 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
     assert_eq!(restore_ticket_from(&directory.join("plan.json")).unwrap().len(), 1);
     assert!(!acknowledge_restore(3), "unrelated windows do not acknowledge the ticket");
     assert!(acknowledge_restore(1));
-    if crate::platform::Platform::current() == crate::platform::Platform::Windows {
+    if crate::platform::distribution::UPDATES_ENABLED
+        && crate::platform::Platform::current() == crate::platform::Platform::Windows
+    {
         scheduled_snapshot_scope();
     }
     if plan.elevated {
@@ -130,8 +132,11 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
         {
             std::fs::remove_file(directory.join(name)).unwrap();
         }
-        for name in ["last-handoff.json", "install-next.json"] {
-            std::fs::remove_file(update_root.join(name)).unwrap();
+        std::fs::remove_file(update_root.join("last-handoff.json")).unwrap();
+        if crate::platform::distribution::UPDATES_ENABLED
+            && crate::platform::Platform::current() == crate::platform::Platform::Windows
+        {
+            std::fs::remove_file(update_root.join("install-next.json")).unwrap();
         }
         std::fs::remove_dir(&directory).unwrap();
         std::fs::remove_dir(update_root.join("handoffs")).unwrap();

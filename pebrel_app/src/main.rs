@@ -184,7 +184,9 @@ use crate::polling::{IoListener, ipc};
 
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(all(target_os = "macos", feature = "gpui-shell"))]
-    if let Some(code) = update_download::handoff::macos::run_helper_if_requested() {
+    if crate::platform::distribution::UPDATES_ENABLED
+        && let Some(code) = update_download::handoff::macos::run_helper_if_requested()
+    {
         std::process::exit(code);
     }
     if let Some(code) = platform::ai_session_identity::run_helper_if_requested() {
@@ -438,6 +440,7 @@ fn nebula(mut options: Options) -> Result<(), Box<dyn Error>> {
     // re-installs them whenever another tool (ccswitch…) rewrites the config.
     // The notify proxy powers toast click-to-focus. See ai_hook / notify.
     notify::init_proxy(window_event_loop.create_proxy());
+    #[cfg(feature = "update-test-source")]
     update_check::spawn_once(window_event_loop.create_proxy());
     #[cfg(windows)]
     let _ai_config_guard = ai_hook::spawn_config_guard();

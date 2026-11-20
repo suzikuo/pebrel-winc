@@ -209,6 +209,19 @@ impl NebulaWorkspace {
         (drag.source as isize + slots).clamp(0, len.saturating_sub(1) as isize) as usize
     }
 
+    pub(super) fn sidebar_drag_target(&self, drag: &TabDrag) -> usize {
+        let slots = (drag.offset / drag.pitch.max(1.0)).round() as isize;
+        let (before, after) = self.sidebar_drag_range(drag.source);
+        let target = before as isize + slots.clamp(-(before as isize), after as isize);
+        self.sidebar_drag_peers(drag.source).nth(target as usize).unwrap_or(drag.source)
+    }
+
+    fn sidebar_drag_range(&self, source: usize) -> (usize, usize) {
+        self.sidebar_drag_peers(source).fold((0, 0), |(before, after), ix| {
+            (before + usize::from(ix < source), after + usize::from(ix > source))
+        })
+    }
+
     pub(super) fn update_tab_drag(
         &mut self,
         event: &gpui::MouseMoveEvent,
@@ -307,6 +320,10 @@ impl NebulaWorkspace {
                     .and_then(|_| self.dock_nav_at(x, y))
             })
             .flatten();
+        let (before, after) = self.tab_drag.as_ref().map_or((0, 0), |drag| match drag.axis {
+            TabDragAxis::Vertical => self.sidebar_drag_range(drag.source),
+            TabDragAxis::Horizontal => (drag.source, len.saturating_sub(drag.source + 1)),
+        });
         let drag = self.tab_drag.as_mut().expect("checked above");
         let dx = x - drag.press_x;
         let dy = y - drag.press_y;
@@ -318,9 +335,7 @@ impl NebulaWorkspace {
                 TabDragAxis::Vertical => dy,
                 TabDragAxis::Horizontal => dx,
             };
-            let before = -(drag.source as f32) * drag.pitch;
-            let after = (len.saturating_sub(1) as f32 - drag.source as f32) * drag.pitch;
-            drag.offset = delta.clamp(before, after.max(before));
+            drag.offset = delta.clamp(-(before as f32) * drag.pitch, after as f32 * drag.pitch);
             drag.dock = dock;
             cx.notify();
         }
@@ -333,7 +348,10 @@ impl NebulaWorkspace {
             if let Some(nav) = drag.dock {
                 self.dock_tab_into_active(drag.source, nav, window, cx);
             } else {
-                let target = Self::drag_slot(&drag, self.tabs.len());
+                let target = match drag.axis {
+                    TabDragAxis::Vertical => self.sidebar_drag_target(&drag),
+                    TabDragAxis::Horizontal => Self::drag_slot(&drag, self.tabs.len()),
+                };
                 self.move_tab(drag.source, target, window, cx);
             }
         }

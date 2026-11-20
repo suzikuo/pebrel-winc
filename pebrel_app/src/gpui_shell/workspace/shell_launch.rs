@@ -13,8 +13,20 @@
 //!   让 wsl.exe 自己报错，而不是换成用户没要的 PowerShell。
 
 use super::NebulaWorkspace;
-use gpui::App;
+use gpui::{App, Context, Window};
 use std::path::Path;
+
+impl NebulaWorkspace {
+    pub(super) fn add_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The configured startup directory takes precedence over the focused pane's
+        // directory, including when opening a terminal from a group header.
+        let (launch, cwd) = match Self::startup_directory() {
+            Some(dir) => (configured_local_launch(cx), Some(dir)),
+            None => self.new_tab_from_focused(cx),
+        };
+        self.add_terminal_with(launch, cwd, None, window, cx);
+    }
+}
 
 /// Resolve the selected program before interpreting the caller's directory.
 pub(super) fn runtime_tab_launch(

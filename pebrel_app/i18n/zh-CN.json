@@ -1,4 +1,18 @@
 {
+  "tab_groups": {
+    "create": "新建标签分组",
+    "rename": "重命名分组",
+    "name": "分组名称",
+    "assign": "移到分组",
+    "ungrouped": "未分组",
+    "new_tab": "在此分组中新建终端",
+    "actions": "分组操作",
+    "move_up": "上移分组",
+    "move_down": "下移分组",
+    "delete": "删除分组并取消标签归组",
+    "invalid_name": "分组名称须包含 1 到 80 个可见字符。",
+    "save_failed": "无法保存标签分组。请检查 Pebrel 配置目录中的 tab-groups.json。"
+  },
   "prompt_suggestions": {
     "title": "提示词预测",
     "description": "为 Claude Code、Pi 和 OpenCode 的原生空输入框预测下一句话。新会话生效，语言跟随软件设置。",
@@ -570,6 +584,11 @@
       "grant_title": "安装 {name} 需要你允许：",
       "grant_allow": "允许并安装",
       "grant_cancel": "取消",
+      "grant_directory_launcher": "选择插件命令时，允许使用当前目录启动下列 Windows 程序并传入所列参数",
+      "launcher_windows": "{title} · Windows：{path} {args}",
+      "launcher_wsl": "WSL 参数：{args}",
+      "launcher_failed": "无法启动插件程序：{error}",
+      "launcher_no_target": "请选择已上报工作目录的本地 Windows 或 WSL 窗格。",
       "grant_theme_library": "向主题库添加主题（不会自动应用）",
       "broken": "这个插件已无法加载：{error}",
       "themes_kept": "卸载插件时，它加入主题库的主题会保留。"

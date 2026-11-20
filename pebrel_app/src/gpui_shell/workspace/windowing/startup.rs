@@ -11,7 +11,10 @@ pub(crate) fn open_initial_window(
     shell_id: Option<String>,
     launched_at_login: bool,
 ) {
-    if let Some(sessions) = crate::update_download::handoff::restore_ticket() {
+    let update_sessions = crate::platform::distribution::UPDATES_ENABLED
+        .then(crate::update_download::handoff::restore_ticket)
+        .flatten();
+    if let Some(sessions) = update_sessions {
         if let Err(error) = open_update_windows(sessions, Some(ai_events), Some(shell_events), cx) {
             log::error!("Could not reopen updated workspace: {}", error.message);
             assert!(

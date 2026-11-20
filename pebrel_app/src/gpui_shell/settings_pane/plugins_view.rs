@@ -9,6 +9,7 @@ use crate::plugins::install::{Broken, Installed};
 fn grant_label(grant: Grant) -> Message {
     match grant {
         Grant::ThemeLibrary => Message::SettingsPluginsGrantThemeLibrary,
+        Grant::DirectoryLauncher => Message::SettingsPluginsGrantDirectoryLauncher,
     }
 }
 
@@ -136,6 +137,21 @@ impl SettingsPane {
         for grant in &pending.request.requested {
             grants = grants
                 .child(div().text_sm().child(format!("• {}", language.text(grant_label(*grant)))));
+        }
+        for launcher in &pending.request.directory_launchers {
+            grants = grants.child(
+                div().text_sm().whitespace_normal().child(language.format(
+                    Message::SettingsPluginsLauncherWindows,
+                    &[("title", &launcher.title), ("path", &launcher.executable),
+                        ("args", &format!("{:?}", launcher.windows_args))],
+                )),
+            );
+            if let Some(args) = &launcher.wsl_args {
+                grants = grants.child(div().text_sm().whitespace_normal().child(language.format(
+                    Message::SettingsPluginsLauncherWsl,
+                    &[("args", &format!("{args:?}"))],
+                )));
+            }
         }
         v_flex()
             .id("plugins-grant")

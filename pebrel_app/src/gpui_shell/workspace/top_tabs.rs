@@ -19,7 +19,6 @@ use crate::gpui_shell::terminal::view::SidebarActivity;
 use crate::gpui_shell::widgets::toolbar_button;
 use crate::i18n::{Message, UiLanguage};
 
-use super::window_titlebar::title_bar_right_controls;
 use super::{
     NebulaWorkspace, NewWindow, OpenSettings, TAB_LABEL_ICON_SIZE, TAB_LABEL_ICON_W, TabDrag,
     TabDragAxis, TabPresentation, ToggleShellPicker, pane_header, title_bar_panel_controls,
@@ -151,9 +150,7 @@ impl NebulaWorkspace {
         let symbol_family: SharedString = crate::font_install::SYMBOL_FONT_FAMILY.into();
         let label_px = settings.map(|settings| settings.ui_font_size_px).unwrap_or(15.0);
         let port_forward_w = if port_forward_button.is_some() { 32.0 } else { 0.0 };
-        let tab_capacity_w =
-            (f32::from(window.viewport_size().width) - TOP_TAB_RESERVED_W - port_forward_w)
-                .max(TOP_TAB_MIN_W);
+        let tab_capacity_w = self.top_tab_capacity_w(window, port_forward_w);
         let tab_w = tab_width(tab_capacity_w, self.top_tab_count());
         let strip_w = tab_strip_width(tab_w, self.top_tab_count());
         // 溢出时两端各让出一枚翻页按钮。这个反馈是单调的：`tab_w` 已被
@@ -708,7 +705,7 @@ impl NebulaWorkspace {
             // 共享详情侧栏入口固定在其右侧。
             .child(div().h_full().flex_1().min_w_0())
             .child(
-                title_bar_right_controls()
+                self.title_bar_right_controls(cx)
                     .child(self.render_terminal_find_button(settings_active, cx))
                     .child(
                         toolbar_button(
@@ -749,6 +746,13 @@ impl NebulaWorkspace {
         cx.notify();
     }
 
+    fn top_tab_capacity_w(&self, window: &Window, port_forward_w: f32) -> f32 {
+        let reserved = TOP_TAB_RESERVED_W + port_forward_w;
+        #[cfg(windows)]
+        let reserved = reserved + self.plugin_toolbar_width();
+        (f32::from(window.viewport_size().width) - reserved).max(TOP_TAB_MIN_W)
+    }
+
     /// 横向拖拽越界自动滚：指针进到视口左/右边缘 [`TOP_TAB_EDGE_BAND`] 内就
     /// 按半个步距推一次。翻页按钮解决的是"看不见后面还有 tab"，这条解决的是
     /// "拖着 tab 推不过滚动边界"——两者少一个，tab 一多都还是废的。
@@ -764,8 +768,7 @@ impl NebulaWorkspace {
         if self.tabs_position != pebrel_settings::TabsPositionName::Top {
             return;
         }
-        let capacity_w =
-            (f32::from(window.viewport_size().width) - TOP_TAB_RESERVED_W).max(TOP_TAB_MIN_W);
+        let capacity_w = self.top_tab_capacity_w(window, 0.0);
         let tab_w = tab_width(capacity_w, self.top_tab_count());
         let strip_w = tab_strip_width(tab_w, self.top_tab_count());
         if !strip_overflows(strip_w, capacity_w) {

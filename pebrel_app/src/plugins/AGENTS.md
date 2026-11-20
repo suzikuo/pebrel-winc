@@ -10,4 +10,5 @@
 - 安装库（`install.rs`）只复制清单声明的文件，回执由宿主写入；授权只来自用户的安装确认，不来自清单或包内文件。插件对主题库的写入集中在 `themes.rs`，复用主题包校验和主题文档校验，不另写主题规则，也不应用设置。
 - 当前事实和命令示例见 README；设计依据见 [命令地基](../../../architecture/notes/pebrel_app/plugins/2026-09-28-bounded-command-foundation.md) 、[核心体验边界](../../../architecture/notes/pebrel_app/plugins/2026-10-01-core-experience-boundary.md) 和 [安装库与主题授权](../../../architecture/notes/pebrel_app/plugins/2026-11-09-install-library-and-theme-grant.md)。
 
+- 目录启动器的安装授权绑定清单里的可执行文件和参数。顶栏按钮在开窗、窗口激活和设置页修改插件后异步刷新。宿主在后台执行点击时选定的本地目录操作，派发前复核插件授权和启用状态。设计依据见 [目录启动授权](../../../architecture/notes/pebrel_app/plugins/2026-11-19-user-approved-directory-launchers.md)。
 - Luau 引擎、配置模块与不可捕获限额的依据见 [Luau VM 边界](../../../architecture/notes/pebrel_app/luau/2026-11-02-bounded-luau-vms.md)。

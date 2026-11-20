@@ -220,6 +220,9 @@ pub struct TabSession {
     /// User-selected tab light-strip color. `None` follows the current theme.
     #[serde(default)]
     pub color: Option<Rgb>,
+    /// Optional profile-scoped manual tab group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<u64>,
     /// v4: how the first pane starts. `None` (older file) means `Default`.
     #[serde(default)]
     pub launch: Option<LaunchSession>,
@@ -234,7 +237,7 @@ pub struct TabSession {
 impl TabSession {
     /// A v3-shaped tab: one pane at `cwd`, default shell.
     pub fn single(cwd: String, custom_name: Option<String>, color: Option<Rgb>) -> Self {
-        Self { cwd, custom_name, color, launch: None, layout: None, active_pane: 0 }
+        Self { cwd, custom_name, color, group_id: None, launch: None, layout: None, active_pane: 0 }
     }
 }
 

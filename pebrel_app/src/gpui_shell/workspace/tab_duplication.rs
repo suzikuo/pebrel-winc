@@ -208,6 +208,7 @@ impl NebulaWorkspace {
             cwd: String::new(),
             custom_name: meta.custom_name,
             color: meta.color,
+            group_id: meta.group_id,
             launch: meta.launch,
             active_pane: tree.leaves().iter().position(|id| id == focused).unwrap_or(0),
             layout: Some(layout),

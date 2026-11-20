@@ -130,7 +130,7 @@ impl NebulaWorkspace {
     }
 
     fn tabs_window(&self) -> TabsWindow {
-        let want = self.tabs.len();
+        let want = self.sidebar_row_count();
         let show = visible_count(
             want,
             self.tabs_viewport_h,
@@ -156,8 +156,9 @@ impl NebulaWorkspace {
     }
 
     pub(super) fn reveal_active_tab(&mut self) {
+        let active_row = self.reveal_sidebar_tab();
         let window = self.tabs_window();
-        let next = reveal_index(self.active, window.scroll, window.show);
+        let next = reveal_index(active_row, window.scroll, window.show);
         self.tabs_scroll = clamp_scroll(next, window.max);
         self.top_tabs_scroll.scroll_to_item(if self.settings_open {
             self.tabs.len()

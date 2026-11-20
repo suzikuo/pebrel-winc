@@ -20,6 +20,26 @@ fn shell_glyph_size() -> f32 {
 }
 
 impl NebulaWorkspace {
+    pub(super) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.command_palette_open {
+            self.close_command_palette(window, cx);
+            return;
+        }
+        self.command_manager_open = false;
+        self.command_palette_open = true;
+        self.command_palette_selected = 0;
+        self.palette_override = None;
+        self.shell_picker_open = false;
+        self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
+        self.quick_jump_filter = None;
+        self.reset_palette_query(
+            workspace_ui_language().pick("输入命令…", "Type a command..."),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
     pub(super) fn run_selected_palette_action(
         &mut self,
         window: &mut Window,

@@ -1255,7 +1255,9 @@ impl SettingsPane {
     }
 
     fn check_for_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.about_update, AboutUpdateState::Checking) {
+        if !crate::platform::distribution::UPDATES_ENABLED
+            || matches!(self.about_update, AboutUpdateState::Checking)
+        {
             return;
         }
         self.about_update_seq = self.about_update_seq.wrapping_add(1);

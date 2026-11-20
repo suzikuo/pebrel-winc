@@ -14,6 +14,7 @@ pub(super) struct TabMeta {
     pub(super) custom_name: Option<String>,
     /// 色标（右键菜单的标签颜色）；`None` = 不画色条。
     pub(super) color: Option<Rgb>,
+    pub(super) group_id: Option<u64>,
     /// 本 Tab 创建时实际采用的 shell 短标。默认 shell 是“新建时参数”，
     /// 不是全局实时主题；设置改变后既有 PTY 不会换进程，这个标签也不能
     /// 跟着全局值漂移。非终端 Tab 为 `None`。

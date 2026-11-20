@@ -5,16 +5,17 @@
 //! GitHub outage all degrade to "no banner", never to an error the user sees.
 
 use std::sync::Mutex;
+#[cfg(feature = "update-test-source")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "legacy-shell")]
+#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
 use winit::event_loop::EventLoopProxy;
 
-#[cfg(feature = "legacy-shell")]
+#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
 use crate::event::{Event, EventType};
-#[cfg(feature = "legacy-shell")]
+#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
 use crate::message_bar::{Message, MessageType};
 
 const RELEASES_API: &str = "https://api.github.com/repos/Kuddev/pebrel/releases/latest";
@@ -176,9 +177,9 @@ struct GitHubReleaseAsset {
 /// Kick off the once-per-process background check. The result (if any)
 /// arrives as a regular [`EventType::Message`] banner, which the message bar
 /// already knows how to display, deduplicate and dismiss.
-#[cfg(feature = "legacy-shell")]
+#[cfg(all(feature = "legacy-shell", feature = "update-test-source"))]
 pub fn spawn_once(proxy: EventLoopProxy<Event>) {
-    if crate::platform::distribution::current().externally_managed() {
+    if crate::platform::distribution::require_release_check().is_err() {
         return;
     }
     static STARTED: AtomicBool = AtomicBool::new(false);
@@ -214,9 +215,9 @@ pub fn spawn_once(proxy: EventLoopProxy<Event>) {
 
 /// GPUI 主壳使用自己的事件循环；检查结果进入现有 shell event pump，先显示
 /// 轻通知，再由用户决定是否打开更新详情弹窗。
-#[cfg(feature = "gpui-shell")]
+#[cfg(feature = "update-test-source")]
 pub fn spawn_gpui_once(sender: std::sync::mpsc::Sender<crate::gpui_shell::GpuiShellEvent>) {
-    if crate::platform::distribution::current().externally_managed() {
+    if crate::platform::distribution::require_release_check().is_err() {
         return;
     }
     static STARTED: AtomicBool = AtomicBool::new(false);

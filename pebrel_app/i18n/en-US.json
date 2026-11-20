@@ -1,4 +1,18 @@
 {
+  "tab_groups": {
+    "create": "New tab group",
+    "rename": "Rename group",
+    "name": "Group name",
+    "assign": "Move to group",
+    "ungrouped": "Ungrouped",
+    "new_tab": "New terminal in this group",
+    "actions": "Group actions",
+    "move_up": "Move group up",
+    "move_down": "Move group down",
+    "delete": "Delete group and ungroup its tabs",
+    "invalid_name": "Use a group name with 1–80 visible characters.",
+    "save_failed": "Could not save tab groups. Check tab-groups.json in the Pebrel configuration directory."
+  },
   "prompt_suggestions": {
     "title": "Prompt prediction",
     "description": "Predict the next message in empty native inputs in Claude Code, Pi and OpenCode. Applies to new sessions; language follows the app.",
@@ -570,6 +584,11 @@
       "grant_title": "{name} needs your permission to install:",
       "grant_allow": "Allow and install",
       "grant_cancel": "Cancel",
+      "grant_directory_launcher": "Run the listed Windows executable and arguments when you choose its command for the current directory",
+      "launcher_windows": "{title} · Windows: {path} {args}",
+      "launcher_wsl": "WSL arguments: {args}",
+      "launcher_failed": "Could not start plugin launcher: {error}",
+      "launcher_no_target": "Select a local Windows or WSL pane with a working directory.",
       "grant_theme_library": "Add themes to your theme library (never applied automatically)",
       "broken": "This plugin can no longer be loaded: {error}",
       "themes_kept": "Uninstalling a plugin keeps the themes it added to your theme library."

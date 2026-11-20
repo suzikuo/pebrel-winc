@@ -146,9 +146,9 @@ impl NebulaWorkspace {
                 },
                 // 更新通知由进程级 windowing dispatcher 选择 MRU 窗口；这个
                 // 旧的 workspace-local 分发器没有 Window，不能在此打开 Dialog。
-                GpuiShellEvent::UpdateAvailable(_)
-                | GpuiShellEvent::SshPrompt(_)
-                | GpuiShellEvent::OpenDirectories(_) => {},
+                #[cfg(feature = "update-test-source")]
+                GpuiShellEvent::UpdateAvailable(_) => {},
+                GpuiShellEvent::SshPrompt(_) | GpuiShellEvent::OpenDirectories(_) => {},
             }
         }
     }

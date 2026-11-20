@@ -117,7 +117,8 @@ impl NebulaWorkspace {
         let copy_cwd =
             self.tabs[ix].focused_view().map(|view| copy_working_directory_item(view, cx));
         let workspace = cx.entity().downgrade();
-        let menu = PopupMenu::build(window, cx, move |mut menu, _window, _cx| {
+        let menu = PopupMenu::build(window, cx, |mut menu, window, cx| {
+            menu = self.tab_group_submenu(menu, ix, window, cx, workspace.clone());
             if let Some(view) = choose_session {
                 menu = menu.item(
                     PopupMenuItem::new(language.text(Message::SessionChooseConversation)).on_click(

@@ -108,14 +108,18 @@ fn title_bar_frame() -> gpui::Div {
     })
 }
 
-/// 标题栏右侧工具组；右缘留白由平台层决定（见 `RIGHT_CONTROLS_INSET`）。
-pub(super) fn title_bar_right_controls() -> gpui::Div {
-    title_bar_panel_controls()
-        .gap(px(8.0))
-        .pr(px(crate::platform::window_chrome::RIGHT_CONTROLS_INSET))
-}
+pub(super) const TITLE_BAR_CONTROL_GAP: f32 = 8.0;
 
 impl NebulaWorkspace {
+    /// The platform owns the inset next to its native window controls.
+    pub(super) fn title_bar_right_controls(&self, _cx: &mut Context<Self>) -> gpui::Div {
+        let controls = title_bar_panel_controls()
+            .gap(px(TITLE_BAR_CONTROL_GAP))
+            .pr(px(crate::platform::window_chrome::RIGHT_CONTROLS_INSET));
+        #[cfg(windows)]
+        let controls = controls.children(self.render_plugin_toolbar(_cx));
+        controls
+    }
     pub(super) fn render_terminal_find_button(
         &self,
         settings_active: bool,
@@ -206,7 +210,7 @@ mod tests {
     };
 
     #[gpui::test]
-    fn terminal_find_precedes_command_manager_in_both_tab_layouts(cx: &mut TestAppContext) {
+    fn right_controls_are_ordered_in_both_tab_layouts(cx: &mut TestAppContext) {
         use crate::gpui_shell::workspace::windowing;
         cx.update(|cx| {
             gpui_component::init(cx);
@@ -239,6 +243,8 @@ mod tests {
             window.update(|window, cx| {
                 workspace.update(cx, |workspace, cx| {
                     workspace.tabs_position = position;
+                    #[cfg(windows)]
+                    workspace.set_test_plugin_toolbar(true);
                     cx.notify();
                 });
                 window.draw(cx).clear(cx);
@@ -246,6 +252,20 @@ mod tests {
             let find = window.debug_bounds("terminal-find").unwrap();
             let commands = window.debug_bounds("command-manager-toggle").unwrap();
             assert!(find.right() < commands.left(), "{position:?}");
+            #[cfg(windows)]
+            {
+                let selector = "directory-launcher/example.directory-launcher/open-directory";
+                let launcher = window.debug_bounds(selector).unwrap();
+                assert!(launcher.right() < find.left(), "{position:?}");
+                window.update(|window, cx| {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.set_test_plugin_toolbar(false);
+                        cx.notify();
+                    });
+                    window.draw(cx).clear(cx);
+                });
+                assert!(window.debug_bounds(selector).is_none(), "{position:?}");
+            }
         }
     }
 

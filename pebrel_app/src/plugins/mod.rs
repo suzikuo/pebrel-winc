@@ -2,6 +2,7 @@
 
 mod boundary;
 pub(crate) mod cli;
+pub(crate) mod directory;
 pub(crate) mod install;
 mod json;
 mod lua;

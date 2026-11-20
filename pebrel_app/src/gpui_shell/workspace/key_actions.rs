@@ -42,7 +42,12 @@ impl NebulaWorkspace {
             return;
         }
         self.leave_settings(window, cx);
-        if ix < self.tabs.len() && ix != self.active {
+        if ix == self.active {
+            self.reveal_active_tab();
+            cx.notify();
+            return;
+        }
+        if ix < self.tabs.len() {
             self.cancel_pane_drag(cx);
             self.clear_reader_focus(cx);
             self.active = ix;
@@ -69,8 +74,8 @@ impl NebulaWorkspace {
         let Some(index) = action.index_for(count) else { return };
         if top {
             self.activate_top_tab(index, window, cx);
-        } else {
-            self.activate_tab(index, window, cx);
+        } else if let Some(&ix) = self.sidebar_tab_order().get(index) {
+            self.activate_tab(ix, window, cx);
         }
         // Selecting the current tab still returns focus from a side panel.
         self.focus_active(window, cx);
@@ -93,18 +98,20 @@ impl NebulaWorkspace {
             self.focus_active(window, cx);
             return;
         }
-        let len = self.tabs.len();
+        let order = self.sidebar_tab_order();
+        let len = order.len();
         if len == 0 {
             return;
         }
-        let ix = if self.settings_open {
-            if next { 0 } else { len - 1 }
-        } else if next {
-            (self.active + 1) % len
-        } else {
-            (self.active + len - 1) % len
+        let current =
+            (!self.settings_open).then(|| order.iter().position(|&ix| ix == self.active)).flatten();
+        let index = match (current, next) {
+            (None, true) => 0,
+            (None, false) => len - 1,
+            (Some(ix), true) => (ix + 1) % len,
+            (Some(ix), false) => (ix + len - 1) % len,
         };
-        self.activate_tab(ix, window, cx);
+        self.activate_tab(order[index], window, cx);
     }
 
     /// Ctrl+Shift+PageUp/PageDown（WT 的 `moveTab forward/backward`）：把活动
@@ -119,8 +126,15 @@ impl NebulaWorkspace {
         if self.settings_open {
             return;
         }
-        let Some(to) = move_target(self.active, self.tabs.len(), right) else { return };
         let from = self.active;
+        let target = if self.tabs_position == pebrel_settings::TabsPositionName::Top {
+            move_target(from, self.tabs.len(), right)
+        } else if right {
+            self.sidebar_drag_peers(from).find(|&ix| ix > from)
+        } else {
+            self.sidebar_drag_peers(from).take_while(|&ix| ix < from).last()
+        };
+        let Some(to) = target else { return };
         self.move_tab(from, to, window, cx);
         // 顶栏模式下标签可能刚被挪出可视窗口；侧栏模式同样按整行窗口对齐。
         self.reveal_active_tab();

@@ -198,7 +198,8 @@ impl NebulaWorkspace {
             .tab_drag
             .as_ref()
             .filter(|d| d.active && d.axis == TabDragAxis::Vertical)
-            .map(|d| (d.source, Self::drag_slot(d, self.tabs.len()), d.offset));
+            .map(|d| (d.source, self.sidebar_drag_target(d), d.offset));
+        let drag_group = drag.map(|(source, _, _)| self.tab_group_at(source));
 
         // 折叠只裁剪槽位，不改窗口算法：旧壳 `tabs_avail` 与 `tabs_open`
         // 分开——折起来时行矩形为零，但可用高度仍按面板剩余算。
@@ -206,9 +207,27 @@ impl NebulaWorkspace {
         // 行的确定宽度：侧栏宽 − 侧栏 p_2 两边 − 列表右侧滚动条留白。
         // 与下面 `label_avail` 同一份减法口径，两者不能各算一套。
         let row_w = (self.sidebar_width - 16.0 - tab_scroll::TAB_SCROLL_GUTTER).max(1.0);
-        let items = (0..self.tabs.len())
-            .filter(|&ix| tab_scroll::index_visible(ix, tabs_scroll, tabs_show))
-            .map(|ix| {
+        let items = self.sidebar_rows().into_iter().enumerate()
+            .filter(|(row, _)| tab_scroll::index_visible(*row, tabs_scroll, tabs_show))
+            .map(|(_, row)| {
+                let ix = match row {
+                    tab_groups::SidebarRow::Tab(ix) => ix,
+                    tab_groups::SidebarRow::Group(ix) => {
+                        return self.render_tab_group_header(ix, row_w, row_height, cx);
+                    },
+                    tab_groups::SidebarRow::Ungrouped => {
+                        let language = crate::gpui_shell::config::ui_language(cx);
+                        return h_flex()
+                            .w(px(row_w))
+                            .h(px(row_height))
+                            .items_center()
+                            .px_2()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(language.text(crate::i18n::Message::TabGroupsUngrouped))
+                            .into_any_element();
+                    },
+                };
                 let active = ix == self.active;
                 let TabPresentation {
                     title,
@@ -315,7 +334,7 @@ impl NebulaWorkspace {
                 // 三类行位移（旧壳 tab_drag_draw_y 的语义）：被拖行骑指针，
                 // 源与落点之间的行向反方向让一个槽位，其余不动。存储顺序在
                 // 拖拽期间不变，释放时一次性提交。
-                let (dragged, shift) = match drag {
+                let (dragged, shift) = match drag.filter(|_| drag_group == Some(self.tab_group_at(ix))) {
                     Some((src, _, _)) if ix == src => (true, 0.0),
                     Some((src, tgt, _)) if src < tgt && ix > src && ix <= tgt => {
                         (false, -row_pitch)
@@ -735,6 +754,18 @@ impl NebulaWorkspace {
                             .items_center()
                             .gap(px(2.0))
                             .child(
+                                Button::new("sidebar-create-tab-group")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::FolderClosed)
+                                    .tooltip(crate::gpui_shell::config::ui_language(cx)
+                                        .text(crate::i18n::Message::TabGroupsCreate))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.create_tab_group(window, cx);
+                                    })),
+                            )
+                            .child(
                                 // 旧壳 `ChromeHit::NewTab`：直接开设置里的默认
                                 // shell，不经过选择器。三点才是 NewTabMenu。
                                 sidebar_new_tab_control(
@@ -944,7 +975,7 @@ impl NebulaWorkspace {
             )
             .child(self.render_active_pane_title(cx))
             .child(
-                window_titlebar::title_bar_right_controls()
+                self.title_bar_right_controls(cx)
                     .when_some(broadcast_button, |controls, button| controls.child(button))
                     .child(self.render_terminal_find_button(settings_active, cx))
                     .child(

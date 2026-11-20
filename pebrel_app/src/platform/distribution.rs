@@ -1,6 +1,11 @@
 //! 安装渠道只控制应用自更新，不改变用户设置、插件或终端热路径。
 use std::sync::OnceLock;
 
+// Self-built products have no updater. The existing debug acceptance build
+// still exercises the updater against its fixture source.
+pub(crate) const UPDATES_ENABLED: bool = cfg!(feature = "update-test-source");
+const UPDATES_DISABLED: &str = "Application updates are disabled in this build.";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Distribution {
     Direct,
@@ -43,6 +48,9 @@ pub(crate) fn current() -> Distribution {
 
 /// Portable copies still check project releases for a manual download.
 pub(crate) fn require_release_check() -> Result<Distribution, String> {
+    if !UPDATES_ENABLED {
+        return Err(UPDATES_DISABLED.into());
+    }
     let channel = current();
     if channel.externally_managed() {
         require_direct_update()?;
@@ -51,6 +59,9 @@ pub(crate) fn require_release_check() -> Result<Distribution, String> {
 }
 
 pub(crate) fn require_direct_update() -> Result<(), String> {
+    if !UPDATES_ENABLED {
+        return Err(UPDATES_DISABLED.into());
+    }
     match current() {
         Distribution::Direct => Ok(()),
         Distribution::Portable => Err(super::update_installation::PORTABLE_UPDATE_MESSAGE.into()),
@@ -169,6 +180,13 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "update-test-source"))]
+    #[test]
+    fn self_built_app_refuses_release_checks_and_installation() {
+        assert_eq!(require_release_check(), Err(UPDATES_DISABLED.into()));
+        assert_eq!(require_direct_update(), Err(UPDATES_DISABLED.into()));
+    }
+
     #[cfg(windows)]
     #[test]
     fn non_installer_process_stops_before_installer_io() {
@@ -183,7 +201,7 @@ mod tests {
             };
             assert_eq!(current(), expected);
             assert!(require_direct_update().is_err());
-            if expected == Distribution::Portable {
+            if expected == Distribution::Portable && UPDATES_ENABLED {
                 assert_eq!(require_release_check().unwrap(), Distribution::Portable);
             } else {
                 assert!(crate::update_check::check_now().is_err());

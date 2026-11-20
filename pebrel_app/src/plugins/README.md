@@ -48,14 +48,40 @@ pebrel plugin uninstall example.theme-generator
   only the user grants it, with `--grant` or the Settings → Plugins confirmation. Installing fails
   before touching the library when a requested grant is missing, and grants that were not
   requested are not recorded. Reinstalling replaces the files and records the new answer.
-- `theme_library` is currently the only grant. It lets the plugin add themes to the theme library;
-  it never applies a theme or changes settings.
+- `theme_library` lets an installed plugin add themes to the theme library. Applying a theme
+  remains a separate user action.
+- `directory_launcher` authorizes the displayed executable and arguments for a Windows
+  title-bar button. See [Directory launchers](#directory-launchers).
 - `run` accepts an installed ID when no path of that name exists. Disabled plugins do not run.
   Running a package directory never carries grants.
 - `uninstall` removes the plugin's files. Themes it added stay in the theme library.
 - Settings → Plugins offers the same install, enable/disable, uninstall and theme generation.
   Its operations run on the background executor; results carry a sequence number so a newer
   operation discards an older one, and a closed page drops late results.
+
+## Directory launchers
+
+A package can declare `[[directory_launchers]]` in `plugin.toml`. A launcher declares an
+`id`, `title`, an absolute drive-qualified Windows `.exe` path in `executable`, optional
+`windows_args`, and optional `wsl_args`. Action IDs are unique across `commands` and
+`directory_launchers`. A launcher-only plugin may omit `commands`.
+
+On Windows, the workspace title bar shows buttons for installed, enabled launchers. A plugin
+with one launcher uses its package name as the button label. With multiple launchers, each
+button uses its action title. The tooltip gives the action title when the current pane is
+supported. Clicking a button captures the focused pane's directory. For a Windows pane,
+Pebrel uses its directory as the working directory and passes `windows_args` as literal
+arguments. For a WSL pane, it uses `wsl_args` with `{distribution}` and `{directory}`
+substituted once each as whole arguments. An omitted `wsl_args` limits the launcher to
+Windows panes. Buttons are disabled for SSH panes and when no supported directory is known.
+
+Installation requires the `directory_launcher` grant (`--grant directory-launcher` in the
+CLI). The Settings confirmation shows the executable and arguments. Pebrel binds the grant
+to the reviewed declaration and verifies it again at launch. Reinstall and grant approval
+again after editing the declaration. Choose executables you trust. Directory launchers
+are dispatched by the Windows workspace title bar. Plugin authors distribute `plugin.toml`
+in an installable folder. Users install the folder and grant the requested capability in
+Settings → Plugins.
 
 ## Theme contributions
 
@@ -75,7 +101,9 @@ pebrel plugin uninstall example.theme-generator
 ## Package and invocation contracts
 
 - `plugin.toml` owns `manifest_version`, `api_version`, `id`, `name`, `version`, optional `entry`,
-  `permissions`, optional `themes`, and `commands`. Both numeric versions are currently 1; `version` is bounded
+  `permissions`, optional `themes`, optional `commands`, and optional `directory_launchers`.
+  A package must declare at least one command or launcher. Both numeric versions are
+  currently 1. `version` is bounded
   package metadata, not a dependency-range expression. Unknown fields are rejected.
 - Each command declares `id`, `title`, optional object `params`, optional `output`
   (`json` by default, or `theme`), and exactly one `method` or `handler`. A `method` directly invokes a declared Runtime method in Rust; a `handler` names

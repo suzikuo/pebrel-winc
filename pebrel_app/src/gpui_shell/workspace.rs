@@ -64,6 +64,8 @@ mod logos;
 mod notifications;
 mod palette;
 mod pane_header;
+#[cfg(windows)]
+pub(super) mod plugin_toolbar;
 #[cfg(all(test, feature = "gpui-test-support"))]
 #[path = "../platform/profile_environment_tests.rs"]
 mod profile_environment_tests;
@@ -93,6 +95,7 @@ mod ssh_dialog;
 mod ssh_reconnect;
 mod tab_drag;
 mod tab_duplication;
+mod tab_groups;
 mod tab_menu;
 mod tab_presentation;
 use tab_presentation::TabMeta;
@@ -617,6 +620,7 @@ pub struct NebulaWorkspace {
     tabs: Vec<WorkspaceTab>,
     /// 与 `tabs` 同下标的用户元数据，见 [`TabMeta`]。
     tab_meta: Vec<TabMeta>,
+    tab_groups: tab_groups::TabGroups,
     /// 正在行内重命名的标签，见 [`TabRename`]。
     tab_rename: Option<TabRename>,
     pane_rename: Option<PaneRename>,
@@ -689,6 +693,8 @@ pub struct NebulaWorkspace {
     command_palette_open: bool,
     command_palette_input: Entity<InputState>,
     command_palette_selected: usize,
+    #[cfg(windows)]
+    plugin_toolbar: plugin_toolbar::State,
     /// 用户命令管理器贴在右侧覆盖显示，不占终端布局宽度，也不复用应用动作
     /// 命令面板的状态，避免两种“命令”语义互相污染。
     command_manager_open: bool,
@@ -859,7 +865,10 @@ impl NebulaWorkspace {
         let spinner_activation_sub =
             cx.observe_window_activation(window, |workspace, window, cx| {
                 let active = window.is_window_active();
-                if !active {
+                if active {
+                    #[cfg(windows)]
+                    workspace.refresh_plugin_toolbar(cx);
+                } else {
                     workspace.cancel_details_panel_resize(cx);
                     workspace.cancel_left_sidebar_resize(cx);
                 }
@@ -912,6 +921,7 @@ impl NebulaWorkspace {
         let mut this = Self {
             tabs: Vec::new(),
             tab_meta: Vec::new(),
+            tab_groups: tab_groups::TabGroups::new(cx),
             tab_rename: None,
             pane_rename: None,
             // 首窗仍从 1 起，保持既有 runtime/测试身份；后续窗口用高 32 位
@@ -958,6 +968,8 @@ impl NebulaWorkspace {
             command_palette_open: false,
             command_palette_input,
             command_palette_selected: 0,
+            #[cfg(windows)]
+            plugin_toolbar: plugin_toolbar::State::new(cx),
             command_manager_open: false,
             command_manager_group: None,
             command_group_menu: None,
@@ -1055,6 +1067,8 @@ impl NebulaWorkspace {
             Self::start_shell_event_pump(shell_events, cx);
         }
         this.apply_custom_keybinds(cx);
+        #[cfg(windows)]
+        this.refresh_plugin_toolbar(cx);
         let workspace = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             workspace
@@ -1086,18 +1100,6 @@ impl NebulaWorkspace {
         self.sidebar_resizing = None;
         self.reveal_if_tray_disabled(cx);
         cx.notify();
-    }
-
-    fn add_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // 旧壳合同（window_context `spawn_tab` 一族）：新 tab 的 cwd 先取
-        // 设置页的「启动目录」（存在且是目录才算数），否则继承聚焦 pane
-        // 的 cwd——`startup_directory=` 因此在两壳有同一效果。WSL 来宾目录
-        // 见 `tab_duplication::CopyKind::NewTab`。
-        let (launch, cwd) = match Self::startup_directory() {
-            Some(dir) => (shell_launch::configured_local_launch(cx), Some(dir)),
-            None => self.new_tab_from_focused(cx),
-        };
-        self.add_terminal_with(launch, cwd, None, window, cx);
     }
 
     /// 设置页「启动目录」：宿主验证本机路径，WSL 验证来宾路径。
@@ -1679,26 +1681,6 @@ impl NebulaWorkspace {
             node_ix += 1;
         }
         0
-    }
-
-    fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_palette_open {
-            self.close_command_palette(window, cx);
-            return;
-        }
-        self.command_manager_open = false;
-        self.command_palette_open = true;
-        self.command_palette_selected = 0;
-        self.palette_override = None;
-        self.shell_picker_open = false;
-        self.launcher_filter = crate::display::command_palette::LauncherFilter::All;
-        self.quick_jump_filter = None;
-        self.reset_palette_query(
-            workspace_ui_language().pick("输入命令…", "Type a command..."),
-            window,
-            cx,
-        );
-        cx.notify();
     }
 
     fn dismiss_palette_state(&mut self) {

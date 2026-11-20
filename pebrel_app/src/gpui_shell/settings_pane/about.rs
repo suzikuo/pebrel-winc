@@ -69,9 +69,10 @@ impl SettingsPane {
 
     pub(super) fn section_home(&mut self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let language = crate::gpui_shell::config::ui_language(cx);
-        let distribution = crate::platform::distribution::current();
-        let managed = distribution.externally_managed();
-        let portable = distribution == crate::platform::distribution::Distribution::Portable;
+        let updates = crate::platform::distribution::UPDATES_ENABLED;
+        let distribution = updates.then(crate::platform::distribution::current);
+        let managed = distribution.is_none_or(|channel| channel.externally_managed());
+        let portable = distribution == Some(crate::platform::distribution::Distribution::Portable);
         let theme = cx.theme();
         let muted = theme.muted_foreground;
         let ink = theme.foreground;
@@ -79,14 +80,15 @@ impl SettingsPane {
         let warning = theme.warning;
         let danger = theme.danger;
         let base_px = self.font_size_px(cx);
-        let cached_update = crate::update_download::cached_asset().filter(|asset| {
-            !managed
-                && (crate::update_check::is_newer(&asset.version, env!("CARGO_PKG_VERSION"))
-                    || matches!(
-                        crate::update_download::status(asset),
-                        crate::update_download::DownloadStatus::InstallFailed(_)
-                    ))
-        });
+        let cached_update =
+            updates.then(crate::update_download::cached_asset).flatten().filter(|asset| {
+                !managed
+                    && (crate::update_check::is_newer(&asset.version, env!("CARGO_PKG_VERSION"))
+                        || matches!(
+                            crate::update_download::status(asset),
+                            crate::update_download::DownloadStatus::InstallFailed(_)
+                        ))
+            });
         let checking = matches!(self.about_update, AboutUpdateState::Checking);
         let (status, status_color): (SharedString, Hsla) = match &self.about_update {
             AboutUpdateState::Idle => {
@@ -187,27 +189,29 @@ impl SettingsPane {
                                         .text_color(muted)
                                         .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
                                 )
-                                .child(status_badge),
+                                .when(updates, |row| row.child(status_badge)),
                         ),
                 )
-                .child(v_flex().gap_2().flex_shrink_0().child(update_button).when_some(
-                    cached_update,
-                    |actions, asset| {
-                        actions.child(
-                            Button::new("about-cached-update")
-                                .label(language.text(crate::i18n::Message::UpdateViewDetails))
-                                .on_click(move |_, window, cx| {
-                                    crate::gpui_shell::workspace::open_update_dialog(
-                                        crate::update_check::UpdateCheckResult::from_cached(
-                                            asset.clone(),
-                                        ),
-                                        window,
-                                        cx,
-                                    );
-                                }),
-                        )
-                    },
-                ));
+                .when(updates, |identity| {
+                    identity.child(v_flex().gap_2().flex_shrink_0().child(update_button).when_some(
+                        cached_update,
+                        |actions, asset| {
+                            actions.child(
+                                Button::new("about-cached-update")
+                                    .label(language.text(crate::i18n::Message::UpdateViewDetails))
+                                    .on_click(move |_, window, cx| {
+                                        crate::gpui_shell::workspace::open_update_dialog(
+                                            crate::update_check::UpdateCheckResult::from_cached(
+                                                asset.clone(),
+                                            ),
+                                            window,
+                                            cx,
+                                        );
+                                    }),
+                            )
+                        },
+                    ))
+                });
 
         let auto_update_switch =
             crate::gpui_shell::widgets::NebulaSwitch::new("auto-check-updates")
@@ -265,11 +269,13 @@ impl SettingsPane {
                         cx,
                     ))
             })
-            .child(Self::about_value_row(
-                language.text(crate::i18n::Message::SettingsAboutUpdateChannel),
-                div().text_color(muted).child(distribution.label()),
-                cx,
-            ))
+            .when_some(distribution, |column, distribution| {
+                column.child(Self::about_value_row(
+                    language.text(crate::i18n::Message::SettingsAboutUpdateChannel),
+                    div().text_color(muted).child(distribution.label()),
+                    cx,
+                ))
+            })
             .when(!managed, |column| {
                 column.child(Self::about_value_row(
                     language.text(crate::i18n::Message::SettingsAboutLastChecked),
@@ -277,7 +283,7 @@ impl SettingsPane {
                     cx,
                 ))
             })
-            .when_some(distribution.message(), |column, message| {
+            .when_some(distribution.and_then(|channel| channel.message()), |column, message| {
                 column.child(div().text_color(muted).child(language.text(message)))
             });
         let actions = v_flex()
@@ -321,7 +327,7 @@ impl SettingsPane {
                 .flex_wrap()
                 .items_start()
                 .gap(px(64.0))
-                .child(update_column)
+                .when(updates, |row| row.child(update_column))
                 .child(actions),
         )
     }
