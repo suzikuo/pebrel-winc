@@ -592,6 +592,7 @@
       "grant_title": "安装 {name} 需要你允许：",
       "grant_allow": "允许并安装",
       "grant_cancel": "取消",
+      "grant_workspace_ui": "自定义侧栏，并添加可在你点击时修改所选终端标签的菜单命令",
       "grant_directory_launcher": "选择插件命令时，允许使用当前目录启动下列 Windows 程序并传入所列参数",
       "launcher_windows": "{title} · Windows：{path} {args}",
       "launcher_wsl": "WSL 参数：{args}",

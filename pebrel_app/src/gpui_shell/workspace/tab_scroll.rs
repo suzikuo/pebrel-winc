@@ -12,16 +12,25 @@ use gpui::{
 };
 
 use crate::gpui_shell::prelude::*;
+use crate::plugins::workspace::SidebarStyle;
 use crate::scrollbar::{self, OverlayScrollbar};
 
 use pebrel_settings::DensityName;
 
 use super::{NebulaWorkspace, tab_groups::SidebarRow};
 
-pub(super) fn tab_row_height(density: DensityName) -> f32 {
-    match density {
-        DensityName::Standard => 34.0,
-        DensityName::Compact => crate::display::ui::tokens::control::MIN_HIT_TARGET,
+pub(super) const TAB_ROW_HEIGHT: f32 = crate::display::ui::tokens::control::MIN_HIT_TARGET;
+
+fn sidebar_row_height(row: SidebarRow, density: DensityName, style: SidebarStyle) -> f32 {
+    match row {
+        SidebarRow::Group(_) => style.group_height.map_or_else(
+            || match density {
+                DensityName::Standard => 42.0,
+                DensityName::Compact => 38.0,
+            },
+            f32::from,
+        ),
+        _ => style.tab_height.map_or(TAB_ROW_HEIGHT, f32::from),
     }
 }
 
@@ -39,62 +48,77 @@ pub(super) const TAB_SCROLL_GUTTER: f32 = 9.0;
 /// Additional space at the boundary between two sidebar sections.
 const SECTION_GAP: f32 = 6.0;
 
+struct RowBand {
+    top: f32,
+    bottom: f32,
+}
+
 pub(super) struct SidebarRowLayout {
-    starts: Vec<f32>,
-    height: f32,
-    pitch: f32,
+    bands: Vec<RowBand>,
+    gap: f32,
 }
 
 impl SidebarRowLayout {
-    pub(super) fn new(rows: &[SidebarRow], density: DensityName) -> Self {
-        let height = tab_row_height(density);
-        let pitch = height + tab_row_gap(density);
+    pub(super) fn new(rows: &[SidebarRow], density: DensityName, style: SidebarStyle) -> Self {
+        let gap = tab_row_gap(density);
+        let section_gap = style.section_gap.map_or(SECTION_GAP, f32::from);
         let mut offset = 0.0;
-        let starts = rows
+        let bands = rows
             .iter()
             .enumerate()
-            .map(|(index, row)| {
+            .map(|(index, &row)| {
                 if index > 0 && matches!(row, SidebarRow::Group(_) | SidebarRow::Ungrouped) {
-                    offset += SECTION_GAP;
+                    offset += section_gap;
                 }
-                let start = offset;
-                offset += pitch;
-                start
+                let top = offset;
+                let bottom = top + sidebar_row_height(row, density, style);
+                offset = bottom + gap;
+                RowBand { top, bottom }
             })
             .collect();
-        Self { starts, height, pitch }
+        Self { bands, gap }
+    }
+
+    pub(super) fn row_height(&self, index: usize) -> f32 {
+        let band = &self.bands[index];
+        band.bottom - band.top
+    }
+
+    pub(super) fn row_bottom(&self, index: usize, scroll: usize) -> f32 {
+        self.bands[index].bottom - self.bands[scroll].top
     }
 
     pub(super) fn extra_gap_before(&self, index: usize) -> f32 {
-        self.starts[index] - self.starts[index - 1] - self.pitch
+        self.bands[index].top - self.bands[index - 1].bottom - self.gap
     }
 
     fn content_height(&self) -> f32 {
-        self.starts.last().map_or(0.0, |start| start + self.height)
+        self.bands.last().map_or(0.0, |band| band.bottom)
     }
 
     fn visible_end(&self, start: usize, avail_h: f32) -> usize {
-        let Some(&top) = self.starts.get(start) else { return start };
+        let Some(band) = self.bands.get(start) else { return start };
         // The first frame has no measured height yet.
         if avail_h <= 1.0 {
-            return self.starts.len();
+            return self.bands.len();
         }
-        start + self.starts[start..].partition_point(|&y| y + self.height <= top + avail_h + 0.5)
+        let limit = band.top + avail_h + 0.5;
+        start + self.bands[start..].partition_point(|band| band.bottom <= limit)
     }
 
     fn first_fitting_start(&self, last: usize, avail_h: f32) -> usize {
         if avail_h <= 1.0 {
             return 0;
         }
-        let minimum = self.starts[last] + self.height - avail_h - 0.5;
-        self.starts[..last].partition_point(|&y| y < minimum)
+        let minimum = self.bands[last].bottom - avail_h - 0.5;
+        self.bands[..last].partition_point(|band| band.top < minimum)
     }
 
     pub(super) fn row_at(&self, y: f32, scroll: usize, show: usize) -> Option<usize> {
-        let starts = self.starts.get(scroll..scroll + show)?;
-        let absolute_y = y + starts.first()?;
-        let index = starts.partition_point(|&top| top <= absolute_y).checked_sub(1)?;
-        (absolute_y < starts[index] + self.height).then_some(scroll + index)
+        let bands = self.bands.get(scroll..scroll + show)?;
+        let absolute_y = y + bands.first()?.top;
+        let index = bands.partition_point(|band| band.top <= absolute_y).checked_sub(1)?;
+        (absolute_y < bands[index].bottom).then_some(scroll + index)
     }
 }
 
@@ -138,16 +162,21 @@ struct TabsWindow {
 
 impl NebulaWorkspace {
     pub(super) fn tab_row_pitch(&self) -> f32 {
-        tab_row_height(self.density) + tab_row_gap(self.density)
+        sidebar_row_height(SidebarRow::Tab(0, None), self.density, self.plugin_workspace.sidebar)
+            + tab_row_gap(self.density)
+    }
+
+    pub(super) fn sidebar_row_layout_for(&self, rows: &[SidebarRow]) -> SidebarRowLayout {
+        SidebarRowLayout::new(rows, self.density, self.plugin_workspace.sidebar)
     }
 
     fn sidebar_row_layout(&self) -> SidebarRowLayout {
-        SidebarRowLayout::new(&self.sidebar_rows(), self.density)
+        self.sidebar_row_layout_for(&self.sidebar_rows())
     }
 
     fn tabs_window(&self, layout: &SidebarRowLayout) -> TabsWindow {
         let max = layout
-            .starts
+            .bands
             .len()
             .checked_sub(1)
             .map_or(0, |last| layout.first_fitting_start(last, self.tabs_viewport_h));
@@ -355,10 +384,7 @@ impl NebulaWorkspace {
             return;
         }
         // Collapse clips the list to an unusable height; keep the last open viewport.
-        if !self.tabs_section_collapsed
-            && !self.tabs_fold_frozen
-            && h >= tab_row_height(self.density)
-        {
+        if !self.tabs_section_collapsed && !self.tabs_fold_frozen && h >= TAB_ROW_HEIGHT {
             self.tabs_viewport_h = h;
         }
         self.tabs_list_width = w;
@@ -398,16 +424,13 @@ impl NebulaWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{DensityName, SidebarRow, SidebarRowLayout, apply_wheel, wheel_rows};
+    use super::{DensityName, SidebarRow, SidebarRowLayout, SidebarStyle, apply_wheel, wheel_rows};
 
     #[test]
     fn compact_rows_fit_more_tabs_without_shrinking_hit_targets() {
-        for (density, expected_height, expected_show) in
-            [(DensityName::Standard, 34.0, 2), (DensityName::Compact, 32.0, 3)]
-        {
-            let layout = SidebarRowLayout::new(&[SidebarRow::Tab(0, None); 10], density);
-            assert_eq!(layout.height, expected_height);
-            assert!(layout.height >= crate::display::ui::tokens::control::MIN_HIT_TARGET);
+        for (density, expected_show) in [(DensityName::Standard, 2), (DensityName::Compact, 3)] {
+            let layout = SidebarRowLayout::new(&[SidebarRow::Tab(0, None); 10], density, SidebarStyle::default());
+            assert_eq!(layout.row_height(0), 32.0);
             assert_eq!(layout.visible_end(0, 104.0), expected_show);
             assert_eq!(layout.first_fitting_start(9, 104.0), 10 - expected_show);
             assert_eq!(layout.visible_end(0, 0.0), 10);
@@ -416,22 +439,43 @@ mod tests {
     }
 
     #[test]
+    fn plugin_sizes_drive_both_visible_rows_and_drop_bands() {
+        use SidebarRow::{Group, Tab};
+        let rows = [Group(0), Tab(0, Some(0)), Group(1)];
+        let style = SidebarStyle {
+            tab_height: Some(36),
+            group_height: Some(48),
+            section_gap: Some(10),
+            ..Default::default()
+        };
+        let layout = SidebarRowLayout::new(&rows, DensityName::Standard, style);
+        assert_eq!(layout.row_height(0), 48.0);
+        assert_eq!(layout.row_height(1), 36.0);
+        assert_eq!(layout.visible_end(0, 92.0), 2);
+        assert_eq!(layout.row_at(95.0, 0, 3), None);
+        assert_eq!(layout.row_at(110.0, 0, 3), Some(2));
+    }
+
+    #[test]
     fn section_gaps_count_toward_the_viewport_only_between_visible_rows() {
         use SidebarRow::{Group, Tab, Ungrouped};
         let rows = [Group(0), Tab(0, Some(0)), Group(1), Ungrouped, Tab(1, None)];
-        let layout = SidebarRowLayout::new(&rows, DensityName::Standard);
-        let pitch = layout.pitch;
+        let layout = SidebarRowLayout::new(&rows, DensityName::Standard, SidebarStyle::default());
+        let group = layout.row_height(0);
+        let tab = layout.row_height(1);
+        assert_eq!((group, tab), (42.0, 32.0));
         assert_eq!(layout.extra_gap_before(1), 0.0);
         assert_eq!(layout.extra_gap_before(2), 6.0);
         assert_eq!(layout.extra_gap_before(3), 6.0);
         assert_eq!(layout.extra_gap_before(4), 0.0);
-        assert_eq!(layout.content_height(), 4.0 * pitch + 12.0 + layout.height);
-        let two_rows = pitch + layout.height;
-        assert_eq!(layout.visible_end(0, two_rows), 2);
-        assert_eq!(layout.visible_end(1, two_rows), 2);
-        assert_eq!(layout.visible_end(2, two_rows + 6.0), 4);
-        assert_eq!(layout.first_fitting_start(4, two_rows), 3);
-        assert_eq!(layout.visible_end(3, two_rows), 5);
+        assert_eq!(layout.content_height(), 2.0 * group + 3.0 * tab + 4.0 * layout.gap + 12.0);
+        let group_and_tab = group + tab + layout.gap;
+        assert_eq!(layout.visible_end(0, group_and_tab), 2);
+        assert_eq!(layout.visible_end(1, group_and_tab), 2);
+        assert_eq!(layout.visible_end(2, group_and_tab + 6.0), 4);
+        let two_tabs = 2.0 * tab + layout.gap;
+        assert_eq!(layout.first_fitting_start(4, two_tabs), 3);
+        assert_eq!(layout.visible_end(3, two_tabs), 5);
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub(crate) enum Command {
     /// Copy a package into the plugin library and record the grants given here.
     Install {
         path: PathBuf,
-        /// Grant a requested capability: `theme-library` or `directory-launcher`.
+        /// Grant a requested capability: `theme-library`, `directory-launcher`, or `workspace-ui`.
         #[clap(long = "grant", value_parser = parse_grant)]
         grants: Vec<Grant>,
     },
@@ -52,7 +52,7 @@ pub(crate) enum Command {
 
 fn parse_grant(value: &str) -> Result<Grant, String> {
     Grant::parse(value).ok_or_else(|| {
-        format!("unknown grant: {value} (expected theme-library or directory-launcher)")
+        format!("unknown grant: {value} (expected theme-library, directory-launcher, or workspace-ui)")
     })
 }
 

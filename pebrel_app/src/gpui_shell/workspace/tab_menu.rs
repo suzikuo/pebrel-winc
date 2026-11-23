@@ -39,16 +39,28 @@ use super::{
     SplitRight, WorkspaceTab,
 };
 
-/// 标签右键菜单的宿主。画在 workspace 根上，不进标签行的子孙树——理由见
-/// 模块头。
+/// Menus for sidebar groups, tabs and panes share this window-level host.
 pub(super) struct TabContextMenu {
     menu: Entity<PopupMenu>,
     position: Point<Pixels>,
-    /// 菜单里每条命令捕获的都是下标。标签集合在菜单挂着的时候变了（远端
-    /// 或 AI 侧自动关标签），这一份就不该再画。
-    ix: usize,
-    pub(super) pane: Option<u64>,
+    target: ContextMenuTarget,
     _subscription: Subscription,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ContextMenuTarget {
+    Tab(usize),
+    Pane { tab: usize, id: u64 },
+    Group(u64),
+}
+
+impl TabContextMenu {
+    pub(super) fn pane(&self) -> Option<u64> {
+        match self.target {
+            ContextMenuTarget::Pane { id, .. } => Some(id),
+            _ => None,
+        }
+    }
 }
 
 /// 旧壳 `sync_chrome_tabs`：只有 Default / 检测 Shell 的 tab 才允许分叉。
@@ -118,6 +130,7 @@ impl NebulaWorkspace {
         let workspace = cx.entity().downgrade();
         let menu = PopupMenu::build(window, cx, |mut menu, window, cx| {
             menu = self.tab_group_submenu(menu, ix, window, cx, workspace.clone());
+            menu = self.workspace_plugin_tab_menu(menu, ix, window, cx, workspace.clone());
             if let Some(view) = choose_session {
                 menu = menu.item(
                     PopupMenuItem::new(language.text(Message::SessionChooseConversation)).on_click(
@@ -149,7 +162,7 @@ impl NebulaWorkspace {
                 language,
             )
         });
-        self.show_context_menu(menu, ix, None, position, window, cx);
+        self.show_context_menu(menu, ContextMenuTarget::Tab(ix), position, window, cx);
     }
 
     /// Pane menus share the window's single popup host with tab menus, so a
@@ -157,8 +170,7 @@ impl NebulaWorkspace {
     pub(super) fn show_context_menu(
         &mut self,
         menu: Entity<PopupMenu>,
-        ix: usize,
-        pane: Option<u64>,
+        target: ContextMenuTarget,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -172,17 +184,20 @@ impl NebulaWorkspace {
             cx.notify();
         });
         self.tab_menu =
-            Some(TabContextMenu { menu, position, ix, pane, _subscription: subscription });
+            Some(TabContextMenu { menu, position, target, _subscription: subscription });
         cx.notify();
     }
 
     pub(super) fn render_tab_context_menu(&self) -> Option<AnyElement> {
         let state = self.tab_menu.as_ref()?;
-        if state.ix >= self.tabs.len()
-            || state
-                .pane
-                .is_some_and(|id| self.active != state.ix || self.tab_of_pane(id) != Some(state.ix))
-        {
+        let target_exists = match state.target {
+            ContextMenuTarget::Tab(ix) => ix < self.tabs.len(),
+            ContextMenuTarget::Pane { tab, id } => {
+                self.active == tab && self.tab_of_pane(id) == Some(tab)
+            },
+            ContextMenuTarget::Group(id) => self.tab_groups.resolve(Some(id)).is_some(),
+        };
+        if !target_exists {
             return None;
         }
         Some(

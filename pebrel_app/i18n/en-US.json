@@ -592,6 +592,7 @@
       "grant_title": "{name} needs your permission to install:",
       "grant_allow": "Allow and install",
       "grant_cancel": "Cancel",
+      "grant_workspace_ui": "Customize the sidebar and add menu commands that can modify the selected terminal tab when clicked",
       "grant_directory_launcher": "Run the listed Windows executable and arguments when you choose its command for the current directory",
       "launcher_windows": "{title} · Windows: {path} {args}",
       "launcher_wsl": "WSL arguments: {args}",

@@ -174,7 +174,6 @@ impl NebulaWorkspace {
     }
 
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let row_height = tab_scroll::tab_row_height(self.density);
         let row_pitch = self.tab_row_pitch();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -209,20 +208,22 @@ impl NebulaWorkspace {
         // 折叠只裁剪槽位，不改窗口算法：旧壳 `tabs_avail` 与 `tabs_open`
         // 分开——折起来时行矩形为零，但可用高度仍按面板剩余算。
         let rows = self.sidebar_rows();
-        let row_layout = tab_scroll::SidebarRowLayout::new(&rows, self.density);
+        let row_layout = self.sidebar_row_layout_for(&rows);
         let (tabs_scroll, tabs_show) = self.tabs_visible_window(&row_layout);
         // 行的确定宽度：侧栏宽 − 侧栏 p_2 两边 − 列表右侧滚动条留白。
         // 与下面 `label_avail` 同一份减法口径，两者不能各算一套。
         let row_w = (self.sidebar_width - 16.0 - tab_scroll::TAB_SCROLL_GUTTER).max(1.0);
-        let items = rows.into_iter().skip(tabs_scroll).take(tabs_show)
-            .map(|row| {
+        let items = rows.into_iter().enumerate().skip(tabs_scroll).take(tabs_show)
+            .map(|(row_index, row)| {
+                let row_height = row_layout.row_height(row_index);
                 let (ix, group_index) = match row {
                     tab_groups::SidebarRow::Tab(ix, group_index) => (ix, group_index),
                     tab_groups::SidebarRow::Group(ix) => {
                         let drop_target = group_drop.is_some_and(|target| {
                             target.0 == Some(self.tab_groups.group_id(ix))
                         });
-                        return self.render_tab_group_header(ix, row_w, row_height, drop_target, cx);
+                        let menu_offset = row_layout.row_bottom(row_index, tabs_scroll);
+                        return self.render_tab_group_header(ix, row_w, row_height, menu_offset, drop_target, cx);
                     },
                     tab_groups::SidebarRow::Ungrouped => {
                         let language = crate::gpui_shell::config::ui_language(cx);
@@ -738,7 +739,7 @@ impl NebulaWorkspace {
                     .debug_selector(|| "sidebar-tabs-toggle".into())
                     .group(header_group.clone())
                     .w_full()
-                    .h(px(row_height))
+                    .h(px(tab_scroll::TAB_ROW_HEIGHT))
                     .pb_1()
                     // 旧壳标题文字从 panel_x + 16px 起；侧栏根已有 8px
                     // padding，这里再补 8px，箭头不会贴住左边缘。
@@ -1083,7 +1084,7 @@ mod tests {
                     .id("status-probe-row")
                     .debug_selector(|| "status-probe-row".to_owned())
                     .w(px(200.0))
-                    .h(px(tab_scroll::tab_row_height(pebrel_settings::DensityName::Standard)))
+                    .h(px(tab_scroll::TAB_ROW_HEIGHT))
                     .px_2()
                     .overflow_hidden()
                     .child(div().flex_1())

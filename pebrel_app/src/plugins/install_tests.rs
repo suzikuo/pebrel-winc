@@ -125,6 +125,79 @@ fn malformed_directory_launchers_fail_manifest_checks() {
     }
 }
 
+#[cfg(feature = "gpui-shell")]
+#[test]
+fn workspace_menu_requires_a_current_receipt_and_reviewed_luau() {
+    use super::workspace::TabAction;
+
+    let source = tempfile::tempdir().unwrap();
+    let manifest = include_str!("../../examples/plugins/workspace-tabs/plugin.toml");
+    let script = include_str!("../../examples/plugins/workspace-tabs/init.luau");
+    write_package(source.path(), manifest, script);
+    let config = tempfile::tempdir().unwrap();
+    let root = config.path().join("plugins");
+    let library = Library::new(&root);
+    let id = "example.workspace-tabs";
+    let reviewed = Library::inspect(source.path()).unwrap();
+    assert_eq!(reviewed.requested, [Grant::WorkspaceUi]);
+    assert_eq!(library.install(source.path(), &[]).unwrap_err().code, "grant_required");
+    write_package(source.path(), manifest, "return {}\n");
+    assert_eq!(
+        library.install_reviewed(source.path(), &reviewed).unwrap_err().code,
+        "package_changed"
+    );
+    write_package(source.path(), manifest, script);
+    let installed = library.install_reviewed(source.path(), &reviewed).unwrap();
+    let approval = installed.workspace_approval.as_deref().unwrap();
+    assert_eq!(installed.workspace_commands.len(), 3);
+    let context = || {
+        json!({
+            "tab": {"id": "fixture-tab", "title": "Deploy", "active": false},
+            "groups": [{"id": "7", "name": "Work"}],
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    };
+    assert_eq!(
+        library.workspace_tab_action(id, approval, "mark-tab", context()).unwrap(),
+        Some(TabAction::Rename { name: "★ Deploy".into() }),
+    );
+    assert_eq!(
+        library.workspace_tab_action(id, approval, "group-tab", context()).unwrap(),
+        Some(TabAction::AssignGroup { group_id: Some("7".into()) }),
+    );
+    library.set_enabled(id, false).unwrap();
+    assert_eq!(
+        library.workspace_tab_action(id, approval, "mark-tab", context()).unwrap_err().code,
+        "plugin_disabled"
+    );
+    library.set_enabled(id, true).unwrap();
+    fs::write(root.join(id).join("init.luau"), "return {}\n").unwrap();
+    assert_eq!(
+        library.workspace_tab_action(id, approval, "mark-tab", context()).unwrap_err().code,
+        "invalid_install"
+    );
+    library.install(source.path(), &[Grant::WorkspaceUi]).unwrap();
+    assert_eq!(
+        library.workspace_tab_action(id, "stale-approval", "mark-tab", context()).unwrap_err().code,
+        "workspace_changed"
+    );
+}
+
+#[test]
+fn workspace_manifest_validates_style_and_menu_references() {
+    let source = tempfile::tempdir().unwrap();
+    let fixture = include_str!("../../examples/plugins/workspace-tabs/plugin.toml");
+    for (manifest, expected) in [
+        (fixture.replace("tab_height = 36", "tab_height = 16"), "invalid_workspace_style"),
+        (fixture.replace("\"mark-tab\",", "\"undeclared\","), "invalid_workspace_menu"),
+    ] {
+        write_package(source.path(), &manifest, "return {}\n");
+        assert_eq!(Library::inspect(source.path()).unwrap_err().code, expected);
+    }
+}
+
 #[test]
 fn install_requires_every_requested_grant_before_touching_the_library() {
     let (source, config, library) = fixture();

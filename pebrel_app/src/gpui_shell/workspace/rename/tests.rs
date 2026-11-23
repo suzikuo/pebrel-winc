@@ -119,7 +119,7 @@ impl RenameFixture {
         settle(cx);
         self.workspace.read_with(cx, |workspace, _| {
             assert_eq!(
-                workspace.tab_menu.as_ref().and_then(|menu| menu.pane),
+                workspace.tab_menu.as_ref().and_then(|menu| menu.pane()),
                 Some(self.ids[index]),
                 "right click must open the addressed pane menu"
             );

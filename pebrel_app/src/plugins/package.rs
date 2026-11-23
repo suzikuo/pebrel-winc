@@ -34,6 +34,8 @@ pub(super) struct Manifest {
     pub commands: Vec<Command>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub directory_launchers: Vec<Launcher>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<super::workspace::Contribution>,
 }
 
 /// What a command's result means to the host.
@@ -56,6 +58,8 @@ pub(crate) enum Grant {
     ThemeLibrary,
     /// Launch the exact reviewed executable and argument templates from the workspace.
     DirectoryLauncher,
+    /// Contribute workspace styling and run reviewed tab-menu actions.
+    WorkspaceUi,
 }
 
 impl Grant {
@@ -63,6 +67,7 @@ impl Grant {
         match value {
             "theme-library" | "theme_library" => Some(Self::ThemeLibrary),
             "directory-launcher" | "directory_launcher" => Some(Self::DirectoryLauncher),
+            "workspace-ui" | "workspace_ui" => Some(Self::WorkspaceUi),
             _ => None,
         }
     }
@@ -167,6 +172,9 @@ impl Manifest {
         if !self.directory_launchers.is_empty() {
             grants.push(Grant::DirectoryLauncher);
         }
+        if self.workspace.is_some() {
+            grants.push(Grant::WorkspaceUi);
+        }
         grants
     }
 
@@ -178,10 +186,13 @@ impl Manifest {
             return Err(Error::new("invalid_metadata", "invalid id, name, or version"));
         }
         let action_count = self.commands.len() + self.directory_launchers.len();
-        if !(1..=64).contains(&action_count) || self.permissions.len() > 32 {
+        if action_count > 64
+            || (action_count == 0 && self.workspace.is_none())
+            || self.permissions.len() > 32
+        {
             return Err(Error::new(
                 "manifest_limit",
-                "declare 1..=64 commands and launchers in total and at most 32 permissions",
+                "declare a workspace contribution or command, up to 64 actions and 32 permissions",
             ));
         }
         for (index, launcher) in self.directory_launchers.iter().enumerate() {
@@ -234,6 +245,9 @@ impl Manifest {
                 return Err(Error::new("invalid_params", "command params must be an object"));
             }
             json::validate(&command.params)?;
+        }
+        if let Some(workspace) = &self.workspace {
+            workspace.validate(self)?;
         }
         if has_lua != self.entry.is_some() {
             return Err(Error::new(

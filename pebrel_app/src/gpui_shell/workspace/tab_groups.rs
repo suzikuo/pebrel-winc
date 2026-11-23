@@ -7,7 +7,9 @@ use gpui_component::menu::PopupMenuItem;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io, path::PathBuf};
 
-pub(super) const GROUP_GUIDE_X: f32 = 8.0;
+pub(super) const GROUP_GUIDE_X: f32 = 13.0;
+const GROUP_CORNER_RADIUS: f32 = 12.0;
+const GROUP_TRAILING_INSET: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -111,6 +113,12 @@ impl TabGroups {
         self.profile.groups[index].color.accent(index, dark)
     }
 
+    pub(super) fn plugin_group_snapshot(&self) -> Vec<serde_json::Value> {
+        self.profile.groups.iter().map(|group| {
+            serde_json::json!({"id": group.id.to_string(), "name": group.name})
+        }).collect()
+    }
+
     pub(super) fn group_id(&self, index: usize) -> u64 {
         self.profile.groups[index].id
     }
@@ -198,7 +206,7 @@ impl NebulaWorkspace {
             return None;
         }
         let rows = self.sidebar_rows();
-        let layout = tab_scroll::SidebarRowLayout::new(&rows, self.density);
+        let layout = self.sidebar_row_layout_for(&rows);
         let (scroll, visible) = self.tabs_visible_window(&layout);
         let row = rows[layout.row_at(y, scroll, visible)?];
         let destination = row.group_index().map(|index| self.tab_groups.group_id(index));
@@ -297,6 +305,19 @@ impl NebulaWorkspace {
         }
     }
 
+    pub(super) fn apply_plugin_group(
+        &mut self,
+        ix: usize,
+        group: Option<u64>,
+        cx: &mut Context<Self>,
+    ) -> crate::plugins::Result<()> {
+        if self.tab_groups.resolve(group) != group {
+            return Err(crate::plugins::Error::new("target_not_found", "the tab group was removed"));
+        }
+        self.set_tab_group(ix, group, cx);
+        Ok(())
+    }
+
     fn set_tab_group(&mut self, ix: usize, id: Option<u64>, cx: &mut Context<Self>) {
         let Some(meta) = self.tab_meta.get_mut(ix) else { return };
         meta.group_id = id;
@@ -354,6 +375,7 @@ impl NebulaWorkspace {
         ix: usize,
         width: f32,
         height: f32,
+        menu_offset: f32,
         drop_target: bool,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -364,12 +386,13 @@ impl NebulaWorkspace {
             && self.tab_meta.get(self.active).is_some_and(|meta| meta.group_id == Some(id));
         let count = self.tab_meta.iter().filter(|meta| meta.group_id == Some(id)).count();
         let language = crate::gpui_shell::config::ui_language(cx);
-        let workspace = cx.entity().downgrade();
-        let last = ix + 1 == self.tab_groups.profile.groups.len();
-        let dark = cx.theme().is_dark();
-        let current_color = group.color;
-        let accent = current_color.accent(ix, dark);
+        let theme = cx.theme();
+        let accent = group.color.accent(ix, theme.is_dark());
         let tint = accent.opacity(if active { 0.30 } else { 0.18 });
+        let count_text_color = theme.foreground;
+        let style = self.plugin_workspace.sidebar;
+        let trailing_inset = style.group_inset.map_or(GROUP_TRAILING_INSET, f32::from);
+        let radius = px(style.group_radius.map_or(GROUP_CORNER_RADIUS, f32::from));
         h_flex()
             .id(("tab-group", ix))
             .w(px(width))
@@ -377,26 +400,45 @@ impl NebulaWorkspace {
             .items_center()
             .relative()
             .gap(px(2.0))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_tab_group_menu(id, event.position, window, cx);
+                }),
+            )
             .child(
                 div()
                     .absolute()
                     .inset_0()
-                    .top(px(4.0))
-                    .rounded(px(crate::display::UI_CORNER_RADIUS_LOGICAL))
+                    .rounded(radius)
                     .bg(if drop_target { accent.opacity(0.29) } else { tint })
                     .when(drop_target, |fill| fill.border_1().border_color(accent)),
             )
             .child(
                 Button::new(("tab-group-toggle", ix))
                     .ghost()
+                    .rounded(radius)
                     .h_full()
                     .flex_1()
                     .min_w_0()
                     .pl(px(GROUP_GUIDE_X - 3.0))
-                    .pr_1()
+                    .pr(px(if collapsed { trailing_inset } else { 2.0 }))
                     .overflow_hidden()
                     .selected(active)
+                    .aria_label(group.name.clone())
                     .tooltip(group.name.clone())
+                    .on_key_down(cx.listener(
+                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                            let key = &event.keystroke;
+                            if key.key == "menu" || (key.key == "f10" && key.modifiers.shift) {
+                                cx.stop_propagation();
+                                let position =
+                                    this.tabs_list_origin + gpui::point(px(0.0), px(menu_offset));
+                                this.open_tab_group_menu(id, position, window, cx);
+                            }
+                        },
+                    ))
                     .child(
                         h_flex()
                             .w_full()
@@ -419,8 +461,22 @@ impl NebulaWorkspace {
                                     .truncate()
                                     .child(group.name.clone()),
                             )
-                            .when(collapsed, |row| {
-                                row.child(div().flex_shrink_0().text_xs().child(count.to_string()))
+                            .when(collapsed && style.show_collapsed_count.unwrap_or(true), |row| {
+                                row.child(
+                                    h_flex()
+                                        .ml(px(2.0))
+                                        .h(px(21.0))
+                                        .min_w(px(24.0))
+                                        .px(px(6.0))
+                                        .flex_shrink_0()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded_full()
+                                        .bg(accent.opacity(0.20))
+                                        .text_color(count_text_color)
+                                        .text_xs()
+                                        .child(count.to_string()),
+                                )
                             }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -431,68 +487,70 @@ impl NebulaWorkspace {
                         cx.notify();
                     })),
             )
-            .child(
-                Button::new(("tab-group-new-tab", ix))
-                    .ghost()
-                    .compact()
-                    .icon(IconName::Plus)
-                    .aria_label(language.text(Message::TabGroupsNewTab))
-                    .tooltip(language.text(Message::TabGroupsNewTab))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_shell_palette_for_group(Some(id), window, cx);
-                    })),
-            )
-            .child(
-                Button::new(("tab-group-menu", ix))
-                    .ghost()
-                    .compact()
-                    .icon(IconName::EllipsisVertical)
-                    .tooltip(language.text(Message::TabGroupsActions))
-                    .dropdown_menu(move |menu, window, cx| {
-                        let color_workspace = workspace.clone();
-                        let menu = menu.submenu(
-                            language.text(Message::TabGroupsColor),
-                            window,
-                            cx,
-                            move |menu, _, _| {
-                                group_color_items(
-                                    menu,
-                                    ix,
-                                    id,
-                                    current_color,
-                                    dark,
-                                    language,
-                                    &color_workspace,
-                                )
-                            },
-                        );
-                        [
-                            (Message::TabGroupsRename, GroupEdit::Rename(id), false),
-                            (Message::TabGroupsMoveUp, GroupEdit::Move(id, -1), ix == 0),
-                            (Message::TabGroupsMoveDown, GroupEdit::Move(id, 1), last),
-                            (Message::TabGroupsDelete, GroupEdit::Delete(id), false),
-                        ]
-                        .into_iter()
-                        .fold(menu, |menu, (label, edit, disabled)| {
-                            let workspace = workspace.clone();
-                            menu.item(
-                                PopupMenuItem::new(language.text(label))
-                                    .disabled(disabled)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| match edit {
-                                            GroupEdit::Rename(_) => {
-                                                this.edit_tab_group_name(edit, window, cx)
-                                            },
-                                            _ => {
-                                                this.apply_tab_group_edit(edit, "", window, cx);
-                                            },
-                                        });
-                                    }),
-                            )
-                        })
-                    }),
-            )
+            .when(!collapsed && style.show_group_new_tab.unwrap_or(true), |header| {
+                header.child(
+                    Button::new(("tab-group-new-tab", ix))
+                        .ghost()
+                        .compact()
+                        .rounded(px(9.0))
+                        .mr(px(trailing_inset - 3.0))
+                        .icon(IconName::Plus)
+                        .aria_label(language.text(Message::TabGroupsNewTab))
+                        .tooltip(language.text(Message::TabGroupsNewTab))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_shell_palette_for_group(Some(id), window, cx);
+                        })),
+                )
+            })
             .into_any_element()
+    }
+
+    fn open_tab_group_menu(
+        &mut self,
+        id: u64,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = &self.tab_groups.profile.groups;
+        let Some((ix, group)) = groups.iter().enumerate().find(|(_, group)| group.id == id) else {
+            return;
+        };
+        let last = ix + 1 == groups.len();
+        let current_color = group.color;
+        let dark = cx.theme().is_dark();
+        let language = crate::gpui_shell::config::ui_language(cx);
+        let workspace = cx.entity().downgrade();
+        let previous_focus = window.focused(cx);
+        let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+            let color_workspace = workspace.clone();
+            let menu = menu
+                .when_some(previous_focus, |menu, focus| menu.action_context(focus))
+                .submenu(language.text(Message::TabGroupsColor), window, cx, move |menu, _, _| {
+                    group_color_items(menu, ix, id, current_color, dark, language, &color_workspace)
+                });
+            [
+                (Message::TabGroupsRename, GroupEdit::Rename(id), false),
+                (Message::TabGroupsMoveUp, GroupEdit::Move(id, -1), ix == 0),
+                (Message::TabGroupsMoveDown, GroupEdit::Move(id, 1), last),
+                (Message::TabGroupsDelete, GroupEdit::Delete(id), false),
+            ]
+            .into_iter()
+            .fold(menu, |menu, (label, edit, disabled)| {
+                let workspace = workspace.clone();
+                menu.item(PopupMenuItem::new(language.text(label)).disabled(disabled).on_click(
+                    move |_, window, cx| {
+                        let _ = workspace.update(cx, |this, cx| match edit {
+                            GroupEdit::Rename(_) => this.edit_tab_group_name(edit, window, cx),
+                            _ => {
+                                this.apply_tab_group_edit(edit, "", window, cx);
+                            },
+                        });
+                    },
+                ))
+            })
+        });
+        self.show_context_menu(menu, tab_menu::ContextMenuTarget::Group(id), position, window, cx);
     }
 
     pub(super) fn create_tab_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -693,11 +751,12 @@ mod tests {
     fn group_drop_only_hits_visible_rows_and_skips_gaps() {
         let rows = [SidebarRow::Group(0), SidebarRow::Group(1), SidebarRow::Ungrouped];
         let density = pebrel_settings::DensityName::Standard;
-        let layout = tab_scroll::SidebarRowLayout::new(&rows, density);
-        let height = tab_scroll::tab_row_height(density);
+        let layout = tab_scroll::SidebarRowLayout::new(&rows, density, Default::default());
+        let height = layout.row_height(0);
         let pitch = height + tab_scroll::tab_row_gap(density);
         assert_eq!(layout.row_at(-1.0, 0, 2), None);
         assert_eq!(layout.row_at(20.0, 0, 2), Some(0));
+        assert_eq!(layout.row_at(height - 1.0, 0, 2), Some(0));
         assert_eq!(layout.row_at(height, 0, 2), None);
         assert_eq!(layout.row_at(pitch + 3.0, 0, 2), None);
         assert_eq!(layout.row_at(pitch + 6.0, 0, 2), Some(1));

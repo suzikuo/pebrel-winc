@@ -2,8 +2,7 @@
 
 use super::plugins::{Pending, PluginsState};
 use super::*;
-use crate::plugins::Grant;
-use crate::plugins::install::Request;
+use crate::plugins::install::Library;
 use crate::theme_library::ThemeLibraryStore;
 use gpui::{Modifiers, TestAppContext, VisualTestContext, size};
 
@@ -49,7 +48,7 @@ impl Fixture {
     fn pending(&self) -> Pending {
         Pending {
             path: self.package.path().to_owned(),
-            request: Request { name: "Ocean".into(), requested: vec![Grant::ThemeLibrary] },
+            request: Library::inspect(self.package.path()).unwrap(),
         }
     }
 }

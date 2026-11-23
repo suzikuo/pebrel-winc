@@ -130,7 +130,13 @@ impl NebulaWorkspace {
         let row_height: Length = if align_with_native_controls {
             gpui::relative(1.0).into()
         } else {
-            px(super::tab_scroll::tab_row_height(self.density)).into()
+            let top_tab_height = match self.density {
+                pebrel_settings::DensityName::Standard => 34.0,
+                pebrel_settings::DensityName::Compact => {
+                    crate::display::ui::tokens::control::MIN_HIT_TARGET
+                },
+            };
+            px(top_tab_height).into()
         };
         let language = crate::gpui_shell::config::ui_language(cx);
         let port_forward_button = self.render_port_forward_button(cx);

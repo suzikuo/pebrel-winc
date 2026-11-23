@@ -40,13 +40,21 @@ impl Budget {
 pub(super) fn execute(
     package: &Package,
     handler: &str,
+    reviewed_source: Option<&str>,
     arguments: Value,
     timeout: Duration,
     call: &mut RuntimeCall<'_>,
 ) -> Result<Execution> {
     let mut budget =
         Budget { vm: crate::luau::Budget::new(timeout, MAX_LUAU_INTERRUPTS), calls: 0 };
-    let source = package.source()?;
+    let owned_source;
+    let source = match reviewed_source {
+        Some(source) => source,
+        None => {
+            owned_source = package.source()?;
+            &owned_source
+        },
+    };
     budget.remaining()?;
     #[cfg(test)]
     VM_CREATIONS.with(|count| count.set(count.get() + 1));
@@ -123,7 +131,7 @@ pub(super) fn execute(
     }
     lua.sandbox(true).map_err(lua_error)?;
     let entry = lua
-        .load(source.strip_prefix('\u{feff}').unwrap_or(&source))
+        .load(source.strip_prefix('\u{feff}').unwrap_or(source))
         .set_mode(ChunkMode::Text)
         .set_name(package.manifest.entry.as_deref().unwrap_or("plugin"))
         .into_function()

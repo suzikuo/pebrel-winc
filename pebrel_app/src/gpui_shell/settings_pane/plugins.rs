@@ -257,10 +257,9 @@ impl SettingsPane {
                 if this.plugins.sequence != sequence {
                     return;
                 }
-                #[cfg(windows)]
                 if this.plugins.busy.is_some() {
                     cx.set_global(
-                        crate::gpui_shell::workspace::plugin_toolbar::PluginLibraryChanged,
+                        crate::gpui_shell::workspace::plugin_workspace::PluginLibraryChanged,
                     );
                 }
                 this.plugins.loading = false;

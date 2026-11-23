@@ -1,0 +1,33 @@
+manifest_version = 1
+api_version = 1
+id = "example.workspace-tabs"
+name = "Workspace Tabs"
+version = "1.0.0"
+entry = "init.luau"
+
+[workspace]
+tab_menu = ["mark-tab", "group-tab", "new-peer"]
+
+[workspace.sidebar]
+tab_height = 36
+group_height = 48
+section_gap = 10
+group_radius = 16
+group_inset = 14
+show_collapsed_count = true
+show_group_new_tab = true
+
+[[commands]]
+id = "mark-tab"
+title = "标记或取消标记标签"
+handler = "mark"
+
+[[commands]]
+id = "group-tab"
+title = "移到第一个分组 / 移出分组"
+handler = "group"
+
+[[commands]]
+id = "new-peer"
+title = "打开同组 Shell 选择器"
+handler = "new_peer"

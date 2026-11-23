@@ -1,9 +1,10 @@
 # Plugin command foundation
 
 This module implements an explicit, command-scoped plugin entry and a small install library.
-It does not keep plugins resident, register UI panels, or start a plugin worker during normal
-GUI startup. Installed plugins run only when the user invokes one of their commands.
-The entry uses vendored Luauu through the shared mlua dependency, with a VM independent of configuration.
+It does not keep plugins resident or register custom panels. Installed scripts run when the user
+invokes a command, including approved workspace menu items. GUI startup loads declarative
+contributions in the background. The entry uses vendored Luau through the shared mlua
+dependency, with a VM independent of configuration.
 
 The division between optional plugins, product bug fixes and extension-point PRs is defined in
 [BOUNDARIES.md](BOUNDARIES.md). Appearance extensions are explicitly in scope for plugins; this
@@ -52,6 +53,8 @@ pebrel plugin uninstall example.theme-generator
   remains a separate user action.
 - `directory_launcher` authorizes the displayed executable and arguments for a Windows
   title-bar button. See [Directory launchers](#directory-launchers).
+- `workspace_ui` authorizes sidebar styling and tab menu entries. See
+  [Workspace contributions](#workspace-contributions).
 - `run` accepts an installed ID when no path of that name exists. Disabled plugins do not run.
   Running a package directory never carries grants.
 - `uninstall` removes the plugin's files. Themes it added stay in the theme library.
@@ -83,6 +86,50 @@ again after editing the declaration. Choose executables you trust. Directory lau
 are dispatched by the Windows workspace title bar. Plugin authors distribute `plugin.toml`
 in an installable folder. Users install the folder and grant the requested capability in
 Settings → Plugins.
+
+## Workspace contributions
+
+Use Settings → Plugins → Install from folder, or pass `--grant workspace-ui` to `plugin install`.
+The [Workspace Tabs example](../../examples/plugins/workspace-tabs/) demonstrates style and menus.
+
+```toml
+[workspace]
+tab_menu = ["mark-tab"] # IDs of declared Luau commands with JSON output
+
+[workspace.sidebar]
+tab_height = 36             # 32..64 logical px, includes the ungrouped heading
+group_height = 48           # 32..64
+section_gap = 10            # 0..24, extra spacing before subsequent sections
+group_radius = 16           # 0..24
+group_inset = 14            # 4..24, trailing inset
+show_collapsed_count = true
+show_group_new_tab = true   # expanded groups
+```
+
+Each field is optional and omitted fields use native defaults. The enabled plugin with the first
+lexicographic ID that declares a sidebar style supplies the whole style. Tab menu commands from all
+enabled plugins appear under **Plugins** when right-clicking a terminal tab in either tab layout.
+Menus can declare up to 12 unique command IDs per plugin. Style-only packages may omit commands and
+Luau. Window opening, activation, and changes in Settings → Plugins refresh the contribution list.
+
+Handlers receive `(ctx, args)` with `args.tab` containing `id`, `title`, `active`, `group_id`, and
+`args.groups` containing `{ id, name }` entries in sidebar order. IDs are strings. `group_id` can
+be `ctx.null`. Return `nil` for no action or one of these tables. The host targets the clicked tab
+and checks its live identity again before applying the result.
+
+| Return value | Effect |
+| --- | --- |
+| `{ action = "focus" }` | Activate the clicked tab |
+| `{ action = "rename", name = "Build" }` | Set its name. Blank restores the automatic name |
+| `{ action = "move", direction = "previous" }` | Move one step in the current tab layout. Accepts `previous` and `next` |
+| `{ action = "assign_group", group_id = args.groups[1].id }` | Assign to an existing group. Omit `group_id` to ungroup |
+| `{ action = "shell_picker" }` | Open the native Shell picker scoped to the tab's current group |
+
+The host binds approval to the manifest and the menu's Luau entry. Reinstall after editing either.
+Menu handlers run in a fresh bounded VM on the background executor with a 250 ms execution budget.
+They receive the tab context only when clicked. Runtime transport is unavailable to menu handlers.
+`plugin run` returns JSON through the CLI and does not apply workspace actions. Disabling the plugin
+removes its UI contributions. Applied changes to names and groups follow the normal session rules.
 
 ## Theme contributions
 

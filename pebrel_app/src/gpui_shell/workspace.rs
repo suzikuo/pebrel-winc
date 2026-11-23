@@ -65,7 +65,8 @@ mod notifications;
 mod palette;
 mod pane_header;
 #[cfg(windows)]
-pub(super) mod plugin_toolbar;
+mod plugin_toolbar;
+pub(super) mod plugin_workspace;
 #[cfg(all(test, feature = "gpui-test-support"))]
 #[path = "../platform/profile_environment_tests.rs"]
 mod profile_environment_tests;
@@ -692,8 +693,7 @@ pub struct NebulaWorkspace {
     command_palette_open: bool,
     command_palette_input: Entity<InputState>,
     command_palette_selected: usize,
-    #[cfg(windows)]
-    plugin_toolbar: plugin_toolbar::State,
+    plugin_workspace: plugin_workspace::State,
     /// 用户命令管理器贴在右侧覆盖显示，不占终端布局宽度，也不复用应用动作
     /// 命令面板的状态，避免两种“命令”语义互相污染。
     command_manager_open: bool,
@@ -866,8 +866,7 @@ impl NebulaWorkspace {
             cx.observe_window_activation(window, |workspace, window, cx| {
                 let active = window.is_window_active();
                 if active {
-                    #[cfg(windows)]
-                    workspace.refresh_plugin_toolbar(cx);
+                    workspace.refresh_workspace_plugins(cx);
                 } else {
                     workspace.cancel_details_panel_resize(cx);
                     workspace.cancel_left_sidebar_resize(cx);
@@ -968,8 +967,7 @@ impl NebulaWorkspace {
             command_palette_open: false,
             command_palette_input,
             command_palette_selected: 0,
-            #[cfg(windows)]
-            plugin_toolbar: plugin_toolbar::State::new(cx),
+            plugin_workspace: plugin_workspace::State::new(cx),
             command_manager_open: false,
             command_manager_group: None,
             command_group_menu: None,
@@ -1068,8 +1066,7 @@ impl NebulaWorkspace {
             Self::start_shell_event_pump(shell_events, cx);
         }
         this.apply_custom_keybinds(cx);
-        #[cfg(windows)]
-        this.refresh_plugin_toolbar(cx);
+        this.refresh_workspace_plugins(cx);
         let workspace = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             workspace

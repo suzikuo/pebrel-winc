@@ -10,6 +10,7 @@ fn grant_label(grant: Grant) -> Message {
     match grant {
         Grant::ThemeLibrary => Message::SettingsPluginsGrantThemeLibrary,
         Grant::DirectoryLauncher => Message::SettingsPluginsGrantDirectoryLauncher,
+        Grant::WorkspaceUi => Message::SettingsPluginsGrantWorkspaceUi,
     }
 }
 

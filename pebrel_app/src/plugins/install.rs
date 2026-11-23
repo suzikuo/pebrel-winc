@@ -9,6 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::directory::Launcher;
+use super::workspace::{self, Contribution};
 
 use super::package::{
     Grant, MAX_MANIFEST_BYTES, MAX_SOURCE_BYTES, Output, Package, identifier, package_file,
@@ -30,6 +31,8 @@ struct Receipt {
     grants: Vec<Grant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     directory_approval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_approval: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -50,6 +53,14 @@ pub(crate) struct Installed {
     pub theme_commands: Vec<CommandSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub directory_launchers: Vec<Launcher>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Contribution>,
+    #[cfg(feature = "gpui-shell")]
+    #[serde(skip)]
+    pub workspace_approval: Option<String>,
+    #[cfg(feature = "gpui-shell")]
+    #[serde(skip)]
+    pub workspace_commands: Vec<CommandSummary>,
 }
 
 /// A directory that is not a valid installed plugin; it can still be uninstalled.
@@ -71,6 +82,8 @@ pub(crate) struct Request {
     pub name: String,
     pub requested: Vec<Grant>,
     pub directory_launchers: Vec<Launcher>,
+    pub workspace: Option<Contribution>,
+    workspace_approval: Option<String>,
 }
 
 pub(crate) struct Library {
@@ -91,35 +104,44 @@ impl Library {
     /// Read a package's name and requested grants without installing it, so
     /// the user can decide on the grants first.
     pub(crate) fn inspect(source: &Path) -> Result<Request> {
-        Ok(Self::request(&Package::open(source)?))
+        Self::request(&Package::open(source)?)
     }
 
-    fn request(package: &Package) -> Request {
-        Request {
+    fn request(package: &Package) -> Result<Request> {
+        let (workspace_approval, _) = review_workspace(package)?;
+        Ok(Request {
             name: package.manifest.name.clone(),
             requested: package.manifest.requested_grants(),
             directory_launchers: package.manifest.directory_launchers.clone(),
-        }
+            workspace: package.manifest.workspace.clone(),
+            workspace_approval,
+        })
     }
 
     #[cfg(feature = "gpui-shell")]
     /// Themes or directory actions contributed by a package are approved at install time.
     pub(crate) fn install_reviewed(&self, source: &Path, reviewed: &Request) -> Result<Installed> {
         let package = Package::open(source)?;
-        if Self::request(&package) != *reviewed {
-            return Err(Error::new("package_changed", "select the changed package again"));
-        }
-        self.install_package(package, &reviewed.requested)
+        self.install_package(package, &reviewed.requested, Some(reviewed))
     }
 
     /// Copy a checked package into the library, replacing an older install of
     /// the same ID. Fails before touching the library when grants are missing.
     pub(crate) fn install(&self, source: &Path, granted: &[Grant]) -> Result<Installed> {
-        self.install_package(Package::open(source)?, granted)
+        self.install_package(Package::open(source)?, granted, None)
     }
 
-    fn install_package(&self, package: Package, granted: &[Grant]) -> Result<Installed> {
-        let requested = package.manifest.requested_grants();
+    fn install_package(
+        &self,
+        package: Package,
+        granted: &[Grant],
+        reviewed: Option<&Request>,
+    ) -> Result<Installed> {
+        let request = Self::request(&package)?;
+        if reviewed.is_some_and(|reviewed| *reviewed != request) {
+            return Err(Error::new("package_changed", "select the changed package again"));
+        }
+        let requested = &request.requested;
         let missing: Vec<_> = requested.iter().filter(|grant| !granted.contains(grant)).collect();
         if !missing.is_empty() {
             let mut error = Error::new("grant_required", "the plugin needs grants to install");
@@ -146,7 +168,7 @@ impl Library {
         let staged = Package::open(stage.path())?;
         if staged.manifest.id != id
             || staged.manifest.version != manifest.version
-            || Self::request(&staged) != Self::request(&package)
+            || Self::request(&staged)? != request
         {
             return Err(Error::new("package_changed", "package changed during installation"));
         }
@@ -154,8 +176,9 @@ impl Library {
             receipt_version: RECEIPT_VERSION,
             version: manifest.version.clone(),
             enabled: true,
-            grants: requested,
+            grants: request.requested,
             directory_approval: directory_approval(&staged),
+            workspace_approval: request.workspace_approval,
         };
         write_receipt(stage.path(), &receipt)?;
         replace_directory(stage.keep(), &root.join(&id))?;
@@ -186,7 +209,7 @@ impl Library {
     }
 
     pub(crate) fn load(&self, id: &str) -> Result<Installed> {
-        let (package, receipt) = self.open(id)?;
+        let (package, receipt, _) = self.open(id)?;
         let manifest = &package.manifest;
         Ok(Installed {
             id: manifest.id.clone(),
@@ -196,6 +219,21 @@ impl Library {
             grants: receipt.grants,
             bundled_themes: manifest.themes.len(),
             directory_launchers: manifest.directory_launchers.clone(),
+            workspace: manifest.workspace.clone(),
+            #[cfg(feature = "gpui-shell")]
+            workspace_approval: receipt.workspace_approval,
+            #[cfg(feature = "gpui-shell")]
+            workspace_commands: manifest.workspace.as_ref().map_or_else(Vec::new, |workspace| {
+                workspace
+                    .tab_menu
+                    .iter()
+                    .filter_map(|id| {
+                        manifest.commands.iter().find(|command| command.id == *id).map(|command| {
+                            CommandSummary { id: command.id.clone(), title: command.title.clone() }
+                        })
+                    })
+                    .collect()
+            }),
             theme_commands: manifest
                 .commands
                 .iter()
@@ -210,7 +248,7 @@ impl Library {
 
     /// The installed package plus its grants; disabled plugins do not run.
     pub(super) fn open_enabled(&self, id: &str) -> Result<(Package, Vec<Grant>)> {
-        let (package, receipt) = self.open(id)?;
+        let (package, receipt, _) = self.open(id)?;
         if !receipt.enabled {
             return Err(Error::new("plugin_disabled", format!("plugin is disabled: {id}")));
         }
@@ -234,10 +272,39 @@ impl Library {
         }
     }
 
+    #[cfg(feature = "gpui-shell")]
+    pub(crate) fn workspace_tab_action(
+        &self,
+        id: &str,
+        approval: &str,
+        command_id: &str,
+        context: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Option<workspace::TabAction>> {
+        let root = self.root()?;
+        let _lock = lock(&root)?;
+        let (package, receipt, source) = self.open(id)?;
+        if !receipt.enabled {
+            return Err(Error::new("plugin_disabled", id));
+        }
+        let command = package
+            .manifest
+            .workspace
+            .as_ref()
+            .filter(|workspace| workspace.tab_menu.iter().any(|item| item == command_id))
+            .and_then(|_| package.manifest.commands.iter().find(|item| item.id == command_id));
+        let (Some(command), Some(source)) = (command, source) else {
+            return Err(Error::new("workspace_changed", "the approved tab menu has changed"));
+        };
+        if receipt.workspace_approval.as_deref() != Some(approval) {
+            return Err(Error::new("workspace_changed", "the approved tab menu has changed"));
+        }
+        workspace::run(&package, command, &source, context)
+    }
+
     pub(crate) fn set_enabled(&self, id: &str, enabled: bool) -> Result<Installed> {
         let root = self.root()?;
         let _lock = lock(&root)?;
-        let (package, mut receipt) = self.open(id)?;
+        let (package, mut receipt, _) = self.open(id)?;
         receipt.enabled = enabled;
         write_receipt(&package.root, &receipt)?;
         self.load(id)
@@ -259,7 +326,7 @@ impl Library {
         Ok(())
     }
 
-    fn open(&self, id: &str) -> Result<(Package, Receipt)> {
+    fn open(&self, id: &str) -> Result<(Package, Receipt, Option<String>)> {
         let path = installed_path(&self.root, id)?;
         if !path.is_dir() {
             return Err(Error::new("plugin_not_installed", id));
@@ -281,7 +348,16 @@ impl Library {
                 "directory launchers require reinstallation and approval",
             ));
         }
-        Ok((package, receipt))
+        let (workspace_approval, source) = review_workspace(&package)?;
+        if receipt.workspace_approval != workspace_approval
+            || (workspace_approval.is_some() && !receipt.grants.contains(&Grant::WorkspaceUi))
+        {
+            return Err(Error::new(
+                "invalid_install",
+                "workspace contributions require reinstallation and approval",
+            ));
+        }
+        Ok((package, receipt, source))
     }
 
     fn root(&self) -> Result<PathBuf> {
@@ -291,6 +367,13 @@ impl Library {
         }
         self.root.canonicalize().map_err(io_error)
     }
+}
+
+fn review_workspace(package: &Package) -> Result<(Option<String>, Option<String>)> {
+    let Some(workspace) = &package.manifest.workspace else { return Ok((None, None)) };
+    let source = (!workspace.tab_menu.is_empty()).then(|| package.source()).transpose()?;
+    let approval = workspace::approval(&package.manifest, source.as_deref().unwrap_or_default());
+    Ok((Some(approval), source))
 }
 
 fn directory_approval(package: &Package) -> Option<String> {

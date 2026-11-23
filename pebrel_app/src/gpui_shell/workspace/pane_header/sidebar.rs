@@ -195,7 +195,7 @@ impl NebulaWorkspace {
             .aria_description(language.text(Message::WorkspacePaneDragHint))
             .tab_index(0)
             .when(
-                !dragging && !self.tab_menu.as_ref().is_some_and(|menu| menu.pane == Some(id)),
+                !dragging && !self.tab_menu.as_ref().is_some_and(|menu| menu.pane() == Some(id)),
                 |grip| grip.invisible().group_hover(group, |style| style.visible()),
             )
             .focus_visible(|style| style.visible().rounded(px(6.0)).border_1().border_color(accent))
@@ -316,7 +316,13 @@ impl NebulaWorkspace {
                 language,
             )
         });
-        self.show_context_menu(menu, tab, Some(id), position, window, cx);
+        self.show_context_menu(
+            menu,
+            super::super::tab_menu::ContextMenuTarget::Pane { tab, id },
+            position,
+            window,
+            cx,
+        );
     }
 
     fn pane_actions_menu(

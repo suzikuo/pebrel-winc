@@ -4,6 +4,7 @@ mod boundary;
 pub(crate) mod cli;
 pub(crate) mod directory;
 pub(crate) mod install;
+pub(crate) mod workspace;
 mod json;
 mod lua;
 mod package;
@@ -128,6 +129,7 @@ fn execute(
     lua::execute(
         package,
         command.handler.as_deref().expect("validated Luau command"),
+        None,
         parameters,
         timeout,
         call,
