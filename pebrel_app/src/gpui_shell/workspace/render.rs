@@ -31,6 +31,7 @@ impl Render for NebulaWorkspace {
         self.clear_stale_reader_focus(cx);
         self.sync_document_activity(window, cx);
         self.sync_terminal_activity(cx);
+        self.sync_scratch_terminals(cx);
         self.sync_document_details(cx);
         if !self.sidebar_collapsed {
             self.sidebar_closing_width = None;
@@ -42,7 +43,8 @@ impl Render for NebulaWorkspace {
         } else {
             match self.tabs.get(self.active) {
                 Some(WorkspaceTab::Terminal { .. }) => {
-                    Some(self.render_terminal_tab(self.active, cx))
+                    let terminal = self.render_terminal_tab(self.active, cx);
+                    Some(self.render_with_scratch(terminal, cx))
                 },
                 Some(WorkspaceTab::Settings { view, .. }) => {
                     Some(gpui::IntoElement::into_any_element(view.clone()))
@@ -80,6 +82,9 @@ impl Render for NebulaWorkspace {
             .map(|area| (area.x, area.y, area.w, area.h));
 
         div()
+            .when(self.scratch_terminal_enabled(cx), |root| {
+                root.key_context(scratch_terminal::KEY_CONTEXT)
+            })
             .size_full()
             .flex()
             .flex_col()
@@ -153,7 +158,17 @@ impl Render for NebulaWorkspace {
                 });
             }))
             .on_action(cx.listener(|this, _: &CloseActiveTerminal, window, cx| {
-                this.close_active(window, cx);
+                if this.focused_scratch_view(window, cx).is_some() {
+                    this.request_end_scratch_terminal(window, cx);
+                } else {
+                    this.close_active(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &scratch_terminal::ToggleScratchTerminal, window, cx| {
+                this.toggle_scratch_terminal(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &scratch_terminal::HideScratchTerminal, window, cx| {
+                this.hide_scratch_terminal(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 if this.settings_open {
@@ -228,14 +243,14 @@ impl Render for NebulaWorkspace {
             .on_action(cx.listener(|this, _: &ToggleGitPanel, _, cx| {
                 this.toggle_git_tree(cx);
             }))
-            .on_action(cx.listener(|this, _: &IncreaseFontSize, _, cx| {
-                this.bump_font_size(1.0, cx);
+            .on_action(cx.listener(|this, _: &IncreaseFontSize, window, cx| {
+                this.bump_font_size(1.0, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &DecreaseFontSize, _, cx| {
-                this.bump_font_size(-1.0, cx);
+            .on_action(cx.listener(|this, _: &DecreaseFontSize, window, cx| {
+                this.bump_font_size(-1.0, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &ResetFontSize, _, cx| {
-                this.bump_font_size(0.0, cx);
+            .on_action(cx.listener(|this, _: &ResetFontSize, window, cx| {
+                this.bump_font_size(0.0, window, cx);
             }))
             .on_action(cx.listener(|this, _: &CopySelection, window, cx| {
                 if !this.copy_focused_terminal(window, cx) {
@@ -413,6 +428,7 @@ impl Render for NebulaWorkspace {
             .children(self.pane_drag_overlay(cx))
             .children(self.split_drag_visual(cx))
             .children(self.render_left_sidebar_resize_overlay(cx))
+            .children(self.scratch_float_drag_overlay())
             .when(self.pointer_drag_active(), |root| {
                 // 拖拽期间挂窗口级裸监听（canvas 在 paint 期注册）：指针移出
                 // 本窗口后的事件坐标在 viewport 之外，hover 门控的监听器全部

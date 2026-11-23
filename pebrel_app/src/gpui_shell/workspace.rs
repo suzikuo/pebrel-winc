@@ -76,6 +76,7 @@ mod recipes;
 mod remote_files;
 mod remote_tab;
 mod rename;
+mod scratch_terminal;
 #[cfg(test)]
 use rename::apply_cancel_rename;
 use rename::{PaneRename, TabRename, apply_commit_rename};
@@ -85,12 +86,11 @@ mod runtime_tabs;
 mod send_to_chat;
 mod session_persistence;
 mod session_recovery;
+mod settings_navigation;
 pub(crate) mod shell_launch;
 mod shell_picker;
-mod sidebar_resize;
-mod terminal_activity;
-mod settings_navigation;
 mod sidebar;
+mod sidebar_resize;
 mod ssh_dialog;
 mod ssh_reconnect;
 mod tab_drag;
@@ -98,6 +98,7 @@ mod tab_duplication;
 mod tab_groups;
 mod tab_menu;
 mod tab_presentation;
+mod terminal_activity;
 use tab_presentation::TabMeta;
 use tab_presentation::TabPresentation;
 mod tab_scroll;
@@ -642,6 +643,7 @@ pub struct NebulaWorkspace {
     /// 标签栏布局：默认沿用左侧栏；Top 将同一组 tab 放进标题栏。
     tabs_position: pebrel_settings::TabsPositionName,
     density: pebrel_settings::DensityName,
+    sidebar_spacing: pebrel_settings::SidebarSpacing,
     /// 运行时持久化的侧栏逻辑宽；布局、初始窗口和折叠动画必须同源。
     sidebar_width: f32,
     /// 首次手动切换后才启用折叠动画：启动帧保持静止落位（旧壳同感，
@@ -694,6 +696,7 @@ pub struct NebulaWorkspace {
     command_palette_input: Entity<InputState>,
     command_palette_selected: usize,
     plugin_workspace: plugin_workspace::State,
+    scratch: scratch_terminal::State,
     /// 用户命令管理器贴在右侧覆盖显示，不占终端布局宽度，也不复用应用动作
     /// 命令面板的状态，避免两种“命令”语义互相污染。
     command_manager_open: bool,
@@ -870,6 +873,7 @@ impl NebulaWorkspace {
                 } else {
                     workspace.cancel_details_panel_resize(cx);
                     workspace.cancel_left_sidebar_resize(cx);
+                    workspace.cancel_scratch_float_drag(cx);
                 }
                 if workspace.spinner_window_active != active {
                     workspace.spinner_window_active = active;
@@ -939,6 +943,7 @@ impl NebulaWorkspace {
             tabs_section_collapsed: false,
             tabs_position: runtime.tabs_position,
             density: runtime.density,
+            sidebar_spacing: runtime.sidebar_spacing,
             sidebar_width,
             sidebar_fold_armed: false,
             tabs_fold_armed: false,
@@ -968,6 +973,7 @@ impl NebulaWorkspace {
             command_palette_input,
             command_palette_selected: 0,
             plugin_workspace: plugin_workspace::State::new(cx),
+            scratch: scratch_terminal::State::new(runtime.scratch_terminal),
             command_manager_open: false,
             command_manager_group: None,
             command_group_menu: None,
@@ -1078,28 +1084,6 @@ impl NebulaWorkspace {
 
     /// 设置或系统外观变化后的统一热应用：重载全局 `Settings`（主题经
     /// follow_system 折算）、逐终端刷新、重建 chrome 令牌。
-    fn apply_runtime_settings(&mut self, cx: &mut Context<Self>) {
-        let (runtime, settings) = crate::gpui_shell::config::Settings::load_current_snapshot(cx);
-        cx.set_global(settings);
-        for tab in &self.tabs {
-            if let WorkspaceTab::Terminal { panes, .. } = tab {
-                for pane in panes {
-                    pane.view.update(cx, |view, cx| view.apply_settings(cx));
-                }
-            }
-        }
-        crate::gpui_shell::theme::apply_chrome_theme(cx);
-        crate::gpui_shell::apply_app_icon(runtime.app_icon, cx);
-        self.sidebar_width = runtime.sidebar_width;
-        self.tabs_position = runtime.tabs_position;
-        self.density = runtime.density;
-        self.reveal_active_tab();
-        self.sync_settings_layout(tab_reveal_instant(cx));
-        self.sidebar_resizing = None;
-        self.reveal_if_tray_disabled(cx);
-        cx.notify();
-    }
-
     /// 设置页「启动目录」：宿主验证本机路径，WSL 验证来宾路径。
     fn startup_directory() -> Option<std::path::PathBuf> {
         shell_launch::configured_directory()
@@ -1406,6 +1390,11 @@ impl NebulaWorkspace {
             .iter()
             .filter(|pane| pane_id.is_none_or(|id| pane.id == id))
             .find_map(|pane| pane.view.read(cx).busy_process())
+            .or_else(|| {
+                (pane_id.is_none())
+                    .then(|| self.scratch.busy_process(&self.tab_meta.get(tab_ix)?.runtime_id, cx))
+                    .flatten()
+            })
     }
 
     /// 系统标题栏关闭的是整个窗口，必须把所有 Tab/Pane 都纳入同一份旧壳

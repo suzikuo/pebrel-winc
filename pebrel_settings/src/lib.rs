@@ -31,6 +31,10 @@ mod shader_parameters;
 pub use shader_parameters::ShaderTiming;
 mod tab_bar_material;
 pub use tab_bar_material::TabBarMaterial;
+mod tab_layout;
+pub use tab_layout::{
+    DensityName, NewTabPositionName, SidebarGap, SidebarSpacing, TabRevealName, TabsPositionName,
+};
 mod cursor_motion;
 mod custom_theme;
 pub use cursor_motion::CursorMotion;
@@ -47,6 +51,8 @@ pub use notifications::NotificationDuration;
 mod prompt_suggestions;
 pub use prompt_suggestions::PromptSuggestions;
 mod quick_terminal;
+mod scratch_terminal;
+pub use scratch_terminal::{ScratchPlacement, ScratchTerminal};
 mod scrolling;
 pub use scrolling::{
     DEFAULT_SCROLL_SPEED, DEFAULT_SCROLLBACK_LINES, MAX_SCROLL_SPEED, MIN_SCROLL_SPEED,
@@ -687,104 +693,6 @@ mod completion_mode_tests {
     }
 }
 
-/// 标签栏位置。这里只提供产品当前支持的两种布局，避免把设置扩成未实现的
-/// 通用停靠系统。
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum TabsPositionName {
-    #[default]
-    Sidebar,
-    Top,
-}
-
-impl TabsPositionName {
-    pub fn from_settings(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "sidebar" => Some(Self::Sidebar),
-            "top" => Some(Self::Top),
-            _ => None,
-        }
-    }
-
-    pub fn settings_value(self) -> &'static str {
-        match self {
-            Self::Sidebar => "sidebar",
-            Self::Top => "top",
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum TabRevealName {
-    #[default]
-    Slide,
-    Instant,
-}
-
-impl TabRevealName {
-    pub fn from_settings(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "slide" => Some(Self::Slide),
-            "instant" => Some(Self::Instant),
-            _ => None,
-        }
-    }
-
-    pub fn settings_value(self) -> &'static str {
-        match self {
-            Self::Slide => "slide",
-            Self::Instant => "instant",
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum DensityName {
-    #[default]
-    Standard,
-    Compact,
-}
-
-impl DensityName {
-    pub fn from_settings(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "standard" => Some(Self::Standard),
-            "compact" => Some(Self::Compact),
-            _ => None,
-        }
-    }
-
-    pub fn settings_value(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Compact => "compact",
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub enum NewTabPositionName {
-    #[default]
-    AfterCurrent,
-    End,
-}
-
-impl NewTabPositionName {
-    pub fn from_settings(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "after_current" => Some(Self::AfterCurrent),
-            "end" => Some(Self::End),
-            _ => None,
-        }
-    }
-
-    pub fn settings_value(self) -> &'static str {
-        match self {
-            Self::AfterCurrent => "after_current",
-            Self::End => "end",
-        }
-    }
-}
-
 /// 新进程启动时如何选择承载新标签的窗口。
 ///
 /// 默认保留 Nebula 既有的单实例行为：优先交给任意虚拟桌面上最近使用的
@@ -1069,6 +977,7 @@ pub struct RuntimeSettings {
     /// 全宽字形（CJK 等）bold run 用 Regular 字形（粗体提亮不加粗）。
     pub cjk_bold_regular: bool,
     pub tabs_position: TabsPositionName,
+    pub sidebar_spacing: SidebarSpacing,
     pub tab_reveal: TabRevealName,
     pub density: DensityName,
     pub new_tab_position: NewTabPositionName,
@@ -1136,6 +1045,7 @@ pub struct RuntimeSettings {
     pub ssh_proxy_no_proxy: String,
     pub quick_terminal_hotkey: String,
     pub quick_terminal_mode: QuickTerminalMode,
+    pub scratch_terminal: ScratchTerminal,
     /// Remembered logical size; independent of monitor DPI.
     pub quick_terminal_size: Option<QuickTerminalSize>,
     /// 终端卡圆角（逻辑像素）。`None` = 跟随主题自带的几何
@@ -1264,6 +1174,7 @@ impl RuntimeSettings {
             command_history_persist: raw.command_history_persists(),
             prompt_suggestions: PromptSuggestions::from_raw(raw),
             cjk_bold_regular: raw.bool_on("cjk_bold_regular").unwrap_or(true),
+            sidebar_spacing: SidebarSpacing::from_raw(raw),
             tabs_position: raw
                 .value("tabs_position")
                 .and_then(TabsPositionName::from_settings)
@@ -1343,6 +1254,7 @@ impl RuntimeSettings {
                 .unwrap_or_default(),
             ssh_proxy_url: raw.value("ssh_proxy_url").unwrap_or_default().to_owned(),
             ssh_proxy_no_proxy: raw.value("ssh_proxy_no_proxy").unwrap_or_default().to_owned(),
+            scratch_terminal: ScratchTerminal::from_raw(raw),
             quick_terminal_mode: raw
                 .value("quick_terminal_mode")
                 .and_then(QuickTerminalMode::from_settings)

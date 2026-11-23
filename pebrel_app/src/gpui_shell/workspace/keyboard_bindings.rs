@@ -67,6 +67,18 @@ pub(super) fn gpui_binding_combo(combo: &str) -> String {
 /// 注册工作区快捷键；在 `gpui_component::init` 之后调用一次。
 pub(super) fn init(cx: &mut App) {
     cx.bind_keys(default_workspace_bindings());
+    cx.bind_keys([
+        KeyBinding::new(
+            scratch_terminal::SHORTCUT,
+            scratch_terminal::ToggleScratchTerminal,
+            Some(scratch_terminal::KEY_CONTEXT),
+        ),
+        KeyBinding::new(
+            "escape",
+            scratch_terminal::HideScratchTerminal,
+            Some(scratch_terminal::ESCAPE_CONTEXT),
+        ),
+    ]);
     let modifier = if crate::platform::Platform::current() == crate::platform::Platform::MacOS {
         "cmd"
     } else {

@@ -121,7 +121,10 @@ impl NebulaWorkspace {
     }
 
     pub(super) fn pointer_drag_active(&self) -> bool {
-        self.tab_drag.is_some() || self.sidebar_resizing.is_some() || self.details_panel_resizing()
+        self.tab_drag.is_some()
+            || self.sidebar_resizing.is_some()
+            || self.details_panel_resizing()
+            || self.scratch_float_drag_active()
     }
 
     /// 窗口级裸释放/移动监听（canvas 作为 paint 钩子注册 `Window::on_mouse_event`）：
@@ -141,9 +144,18 @@ impl NebulaWorkspace {
                 if !workspace.read(cx).pointer_drag_active() {
                     return;
                 }
+                let scratch_drag = workspace.read(cx).scratch_float_drag_active();
                 let moves = entity.clone();
                 window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, window, cx| {
                     if phase != gpui::DispatchPhase::Capture {
+                        return;
+                    }
+                    if scratch_drag {
+                        if let Some(workspace) = moves.upgrade() {
+                            workspace.update(cx, |this, cx| {
+                                this.move_scratch_float_drag(event, cx);
+                            });
+                        }
                         return;
                     }
                     let viewport = window.viewport_size();
@@ -170,6 +182,10 @@ impl NebulaWorkspace {
                     }
                     let Some(workspace) = ups.upgrade() else { return };
                     workspace.update(cx, |this, cx| {
+                        if this.finish_scratch_float_drag(event.position, cx) {
+                            cx.stop_propagation();
+                            return;
+                        }
                         if this.finish_left_sidebar_resize(cx)
                             | this.finish_details_panel_resize(cx)
                         {
@@ -361,7 +377,9 @@ impl NebulaWorkspace {
             if let Some(nav) = drag.dock {
                 self.dock_tab_into_active(drag.source, nav, window, cx);
             } else if let Some(destination) = drag.sidebar_group_drop {
-                if let Some(source) = drag.cross_window.and_then(|payload| payload.source_tab_index(self)) {
+                if let Some(source) =
+                    drag.cross_window.and_then(|payload| payload.source_tab_index(self))
+                {
                     self.drop_tab_in_group(source, destination, window, cx);
                 }
             } else {

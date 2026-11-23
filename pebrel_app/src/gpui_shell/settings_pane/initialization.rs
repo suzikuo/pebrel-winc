@@ -766,6 +766,7 @@ impl SettingsPane {
             font_family_input,
             font_family_cjk_input,
             ui_font_family_input,
+            sidebar_gap_edit: None,
             font_size_input,
             font_size_editing: None,
             font_picker_trigger_bounds: None,

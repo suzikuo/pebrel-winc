@@ -714,6 +714,7 @@ impl NebulaWorkspace {
             .child(
                 self.title_bar_right_controls(cx)
                     .child(self.render_terminal_find_button(settings_active, cx))
+                    .children(self.scratch_button(cx))
                     .child(
                         toolbar_button(
                             "top-toggle-command-manager",
@@ -754,7 +755,7 @@ impl NebulaWorkspace {
     }
 
     fn top_tab_capacity_w(&self, window: &Window, port_forward_w: f32) -> f32 {
-        let reserved = TOP_TAB_RESERVED_W + port_forward_w;
+        let reserved = TOP_TAB_RESERVED_W + port_forward_w + self.scratch_toolbar_width();
         #[cfg(windows)]
         let reserved = reserved + self.plugin_toolbar_width();
         (f32::from(window.viewport_size().width) - reserved).max(TOP_TAB_MIN_W)

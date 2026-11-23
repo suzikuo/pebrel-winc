@@ -13,6 +13,8 @@ pub(crate) struct Contribution {
     pub sidebar: Option<SidebarStyle>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tab_menu: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scratch_terminal: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -29,8 +31,11 @@ pub(crate) struct SidebarStyle {
 
 impl Contribution {
     pub(super) fn validate(&self, manifest: &Manifest) -> Result<()> {
-        if self.sidebar.is_none() && self.tab_menu.is_empty() {
-            return Err(Error::new("invalid_workspace", "declare a sidebar style or tab menu"));
+        if self.sidebar.is_none() && self.tab_menu.is_empty() && !self.scratch_terminal {
+            return Err(Error::new(
+                "invalid_workspace",
+                "declare a sidebar style, tab menu or scratch terminal",
+            ));
         }
         if let Some(style) = self.sidebar {
             for (name, value, minimum, maximum) in [

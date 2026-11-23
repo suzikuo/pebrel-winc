@@ -3,7 +3,7 @@ use pebrel_settings::TabsPositionName;
 
 use super::{
     NebulaWorkspace, SettingsPane, SettingsPaneEvent, SidebarActivity, TabPresentation,
-    tab_reveal_instant,
+    WorkspaceTab, tab_reveal_instant,
 };
 
 #[cfg(all(test, feature = "gpui-test-support"))]
@@ -23,6 +23,37 @@ fn sidebar_state(
 }
 
 impl NebulaWorkspace {
+    pub(super) fn apply_runtime_settings(&mut self, cx: &mut Context<Self>) {
+        let (runtime, settings) = crate::gpui_shell::config::Settings::load_current_snapshot(cx);
+        cx.set_global(settings);
+        for tab in &self.tabs {
+            if let WorkspaceTab::Terminal { panes, .. } = tab {
+                for pane in panes {
+                    pane.view.update(cx, |view, cx| view.apply_settings(cx));
+                }
+            }
+        }
+        self.scratch.settings = runtime.scratch_terminal;
+        self.scratch.apply_settings(cx);
+        crate::gpui_shell::theme::apply_chrome_theme(cx);
+        crate::gpui_shell::apply_app_icon(runtime.app_icon, cx);
+        self.sidebar_width = runtime.sidebar_width;
+        self.tabs_position = runtime.tabs_position;
+        if (self.sidebar_spacing != runtime.sidebar_spacing || self.density != runtime.density)
+            && self.tab_drag.as_ref().is_some_and(|drag| drag.axis == super::TabDragAxis::Vertical)
+            && let Some(drag) = self.tab_drag.take()
+        {
+            super::windowing::clear_cross_window_drag_target(drag.cross_window_target, cx);
+        }
+        self.density = runtime.density;
+        self.sidebar_spacing = runtime.sidebar_spacing;
+        self.reveal_active_tab();
+        self.sync_settings_layout(tab_reveal_instant(cx));
+        self.sidebar_resizing = None;
+        self.reveal_if_tray_disabled(cx);
+        cx.notify();
+    }
+
     /// 热应用设置页变更，并把 SSH 连接请求转为新标签。
     pub(super) fn on_settings_event(
         &mut self,

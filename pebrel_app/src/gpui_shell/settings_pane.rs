@@ -51,10 +51,12 @@ mod design;
 mod font_picker;
 mod providers;
 mod reset;
+mod scratch_terminal;
 mod scrolling;
 mod search_header;
 mod segmented;
 mod setting_help;
+mod sidebar_spacing;
 mod terminal_effect;
 mod theme_picker;
 
@@ -236,8 +238,9 @@ pub struct SettingsPane {
     font_family_input: Entity<InputState>,
     font_family_cjk_input: Entity<InputState>,
     ui_font_family_input: Entity<InputState>,
+    sidebar_gap_edit: Option<sidebar_spacing::GapEdit>,
     font_size_input: Entity<InputState>,
-    font_size_editing: Option<bool>,
+    font_size_editing: Option<appearance::FontSizeTarget>,
     /// 字体输入框上一帧的窗口坐标。字体目录是宽弹层，不能把整条设置行当
     /// 锚点；否则输入框在右侧、菜单却会从正文左缘展开。
     font_picker_trigger_bounds: Option<gpui::Bounds<gpui::Pixels>>,
@@ -419,6 +422,8 @@ impl SettingsPane {
                 | "dim_inactive_panes"
                 | "refresh_environment"
                 | "automatic_command_views"
+                | pebrel_settings::ScratchTerminal::INHERIT_DIRECTORY
+                | pebrel_settings::ScratchTerminal::ESCAPE_TO_HIDE
         ) {
             if let Err(error) = self.try_persist(&[(key, (value as u8).to_string())], cx) {
                 let language = crate::gpui_shell::config::ui_language(cx);
@@ -779,6 +784,22 @@ impl SettingsPane {
         }
         match key {
             "follow_system_theme" => flag!(follow_system_theme),
+            pebrel_settings::ScratchTerminal::PLACEMENT => Some((
+                cur.scratch_terminal.placement != def.scratch_terminal.placement,
+                def.scratch_terminal.placement.settings_value().into(),
+            )),
+            pebrel_settings::ScratchTerminal::SIZE => Some((
+                cur.scratch_terminal.size != def.scratch_terminal.size,
+                format!("{}", def.scratch_terminal.size),
+            )),
+            pebrel_settings::ScratchTerminal::INHERIT_DIRECTORY => Some((
+                cur.scratch_terminal.inherit_directory != def.scratch_terminal.inherit_directory,
+                "1".into(),
+            )),
+            pebrel_settings::ScratchTerminal::ESCAPE_TO_HIDE => Some((
+                cur.scratch_terminal.escape_to_hide != def.scratch_terminal.escape_to_hide,
+                "0".into(),
+            )),
             "copy_on_select" => flag!(copy_on_select),
             "focus_follows_mouse" => Some((cur.focus_follows_mouse.is_some(), String::new())),
             "dim_inactive_panes" => flag!(dim_inactive_panes),

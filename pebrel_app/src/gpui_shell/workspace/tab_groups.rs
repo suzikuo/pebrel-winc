@@ -751,7 +751,7 @@ mod tests {
     fn group_drop_only_hits_visible_rows_and_skips_gaps() {
         let rows = [SidebarRow::Group(0), SidebarRow::Group(1), SidebarRow::Ungrouped];
         let density = pebrel_settings::DensityName::Standard;
-        let layout = tab_scroll::SidebarRowLayout::new(&rows, density, Default::default());
+        let layout = tab_scroll::SidebarRowLayout::new(&rows, density, Default::default(), Default::default());
         let height = layout.row_height(0);
         let pitch = height + tab_scroll::tab_row_gap(density);
         assert_eq!(layout.row_at(-1.0, 0, 2), None);

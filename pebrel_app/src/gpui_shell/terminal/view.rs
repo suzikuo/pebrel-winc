@@ -319,6 +319,7 @@ pub struct TerminalView {
     pub font_italic: Font,
     pub font_bold_italic: Font,
     pub font_size: Pixels,
+    scratch_font_subscription: Option<gpui::Subscription>,
     pub ligatures: bool,
     cell_width_mode: pebrel_settings::CellWidthModeName,
     /// Cell offsets use physical pixels, matching the legacy crossfont
@@ -1140,16 +1141,44 @@ impl TerminalView {
         .detach();
     }
 
-    /// 旧壳 `change_font_size`：一步 1 逻辑 px，钳 4–64。写盘后通知宿主
-    /// 给所有 pane 热应用，chrome 仍锚定 toml 字号。
-    fn zoom_font_size(&mut self, step: f32, cx: &mut Context<Self>) {
-        let current =
-            cx.try_global::<Settings>().map(|settings| settings.font_size_px).unwrap_or(15.0);
-        let next = (current.round() + step).clamp(4.0, 64.0);
-        if (next - current).abs() < f32::EPSILON {
-            return;
+    pub(crate) fn use_scratch_font_size(&mut self, cx: &mut Context<Self>) {
+        self.scratch_font_subscription =
+            Some(cx.observe_global::<Settings>(Self::refresh_scratch_font_size));
+        self.refresh_scratch_font_size(cx);
+    }
+
+    fn refresh_scratch_font_size(&mut self, cx: &mut Context<Self>) {
+        let Some(settings) = cx.try_global::<Settings>() else { return };
+        let size = px(settings.scratch_font_size_px());
+        if self.font_size != size {
+            self.font_size = size;
+            self.shell_pointer.invalidate();
+            cx.notify();
         }
-        if let Err(err) = pebrel_settings::persist_keys(&[("font_size", format!("{next:.2}"))]) {
+    }
+
+    pub(crate) fn zoom_font_size(&mut self, step: f32, cx: &mut Context<Self>) {
+        let scratch = self.scratch_font_subscription.is_some();
+        let settings = cx.try_global::<Settings>();
+        let current = settings.map_or(15.0, |settings| {
+            if scratch { settings.scratch_font_size_px() } else { settings.font_size_px }
+        });
+        let range = pebrel_settings::ScratchTerminal::FONT_SIZE_RANGE;
+        let (key, value) = if scratch && step == 0.0 {
+            if settings.and_then(|settings| settings.scratch_font_size_override).is_none() {
+                return;
+            }
+            (pebrel_settings::ScratchTerminal::FONT_SIZE, String::new())
+        } else {
+            let next = (current.round() + step).clamp(*range.start(), *range.end());
+            if (next - current).abs() < f32::EPSILON {
+                return;
+            }
+            let key =
+                if scratch { pebrel_settings::ScratchTerminal::FONT_SIZE } else { "font_size" };
+            (key, format!("{next:.2}"))
+        };
+        if let Err(err) = pebrel_settings::persist_keys(&[(key, value)]) {
             crate::gpui_shell::try_write_stderr(format_args!(
                 "[nebula:gpui] failed to persist font size: {err}"
             ));
@@ -1157,9 +1186,12 @@ impl TerminalView {
         }
         let settings = Settings::load_current(cx);
         cx.set_global(settings);
-        self.apply_settings(cx);
-        cx.emit(TerminalViewEvent::FontSizeChanged);
-        cx.notify();
+        if scratch {
+            self.refresh_scratch_font_size(cx);
+        } else {
+            self.apply_settings(cx);
+            cx.emit(TerminalViewEvent::FontSizeChanged);
+        }
     }
 
     /// 热应用运行时设置（设置页改动后由宿主调用）。默认光标样式只更新
@@ -1176,7 +1208,11 @@ impl TerminalView {
             settings.font_italic_family.clone(),
             settings.font_bold_italic_family.clone(),
         ];
-        let font_size = px(settings.font_size_px);
+        let font_size = px(if self.scratch_font_subscription.is_some() {
+            settings.scratch_font_size_px()
+        } else {
+            settings.font_size_px
+        });
         let palette = Arc::new(settings.palette.clone());
         let copy_on_select = settings.copy_on_select;
         let default_cursor_style = settings.term_config().default_cursor_style;

@@ -154,7 +154,11 @@ impl NebulaWorkspace {
     }
 
     /// 设置步进同源：逻辑 px ±1，钳 4–64；`delta == 0` 回到 toml 基准字号。
-    pub(super) fn bump_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
+    pub(super) fn bump_font_size(&mut self, delta: f32, window: &Window, cx: &mut Context<Self>) {
+        if let Some(view) = self.focused_scratch_view(window, cx).cloned() {
+            view.update(cx, |view, cx| view.zoom_font_size(delta, cx));
+            return;
+        }
         let settings = cx.try_global::<crate::gpui_shell::config::Settings>();
         let current = settings.map(|s| s.font_size_px).unwrap_or(15.0);
         let next = if delta == 0.0 {
@@ -179,14 +183,16 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.tabs
-            .get(self.active)
-            .and_then(WorkspaceTab::focused_view)
+        self.focused_scratch_view(window, cx)
+            .or_else(|| self.tabs.get(self.active).and_then(WorkspaceTab::focused_view))
             .is_some_and(|view| view.update(cx, |view, cx| view.copy_selection(true, window, cx)))
     }
 
     pub(super) fn paste_focused_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(view) = self.tabs.get(self.active).and_then(WorkspaceTab::focused_view) {
+        if let Some(view) = self
+            .focused_scratch_view(window, cx)
+            .or_else(|| self.tabs.get(self.active).and_then(WorkspaceTab::focused_view))
+        {
             view.update(cx, |view, cx| view.paste(window, cx));
         }
     }

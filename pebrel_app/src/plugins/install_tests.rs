@@ -186,6 +186,32 @@ fn workspace_menu_requires_a_current_receipt_and_reviewed_luau() {
 }
 
 #[test]
+fn scratch_terminal_is_an_explicit_reviewed_workspace_contribution() {
+    let source = tempfile::tempdir().unwrap();
+    let manifest = include_str!("../../examples/plugins/scratch-terminal/plugin.toml");
+    fs::write(source.path().join("plugin.toml"), manifest).unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let root = config.path().join("plugins");
+    let library = Library::new(&root);
+    let id = "local.scratch-terminal";
+
+    assert_eq!(Library::inspect(source.path()).unwrap().requested, [Grant::WorkspaceUi]);
+    assert_eq!(library.install(source.path(), &[]).unwrap_err().code, "grant_required");
+    let installed = library.install(source.path(), &[Grant::WorkspaceUi]).unwrap();
+    assert!(installed.workspace.unwrap().scratch_terminal);
+    library.set_enabled(id, false).unwrap();
+    assert!(!library.list().unwrap().plugins[0].enabled);
+    fs::write(
+        root.join(id).join("plugin.toml"),
+        format!("{manifest}\n[workspace.sidebar]\nsection_gap = 4\n"),
+    )
+    .unwrap();
+    let listing = library.list().unwrap();
+    assert!(listing.plugins.is_empty());
+    assert_eq!(listing.broken.len(), 1);
+}
+
+#[test]
 fn workspace_manifest_validates_style_and_menu_references() {
     let source = tempfile::tempdir().unwrap();
     let fixture = include_str!("../../examples/plugins/workspace-tabs/plugin.toml");

@@ -116,6 +116,13 @@ impl SettingsPane {
                     list = list.child(self.broken_plugin_row(index, broken, index + 1 < total, cx));
                 }
                 page = page.child(list);
+                if listing
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.workspace.as_ref().is_some_and(|ui| ui.scratch_terminal))
+                {
+                    page = page.child(self.scratch_terminal_settings(cx));
+                }
             },
         }
         page.child(
@@ -136,17 +143,30 @@ impl SettingsPane {
         let muted = cx.theme().muted_foreground;
         let mut grants = v_flex().gap_1();
         for grant in &pending.request.requested {
+            if *grant == Grant::WorkspaceUi
+                && let Some(ui) = &pending.request.workspace
+                && ui.scratch_terminal
+            {
+                grants = grants.child(div().text_sm().child(format!(
+                    "• {}",
+                    language.text(Message::SettingsPluginsGrantScratchTerminal),
+                )));
+                if ui.sidebar.is_none() && ui.tab_menu.is_empty() {
+                    continue;
+                }
+            }
             grants = grants
                 .child(div().text_sm().child(format!("• {}", language.text(grant_label(*grant)))));
         }
         for launcher in &pending.request.directory_launchers {
-            grants = grants.child(
-                div().text_sm().whitespace_normal().child(language.format(
-                    Message::SettingsPluginsLauncherWindows,
-                    &[("title", &launcher.title), ("path", &launcher.executable),
-                        ("args", &format!("{:?}", launcher.windows_args))],
-                )),
-            );
+            grants = grants.child(div().text_sm().whitespace_normal().child(language.format(
+                Message::SettingsPluginsLauncherWindows,
+                &[
+                    ("title", &launcher.title),
+                    ("path", &launcher.executable),
+                    ("args", &format!("{:?}", launcher.windows_args)),
+                ],
+            )));
             if let Some(args) = &launcher.wsl_args {
                 grants = grants.child(div().text_sm().whitespace_normal().child(language.format(
                     Message::SettingsPluginsLauncherWsl,
@@ -220,8 +240,21 @@ impl SettingsPane {
                     .child(format!("{} · {}", plugin.version, plugin.id)),
             );
         if !plugin.grants.is_empty() {
-            let granted: Vec<_> =
-                plugin.grants.iter().map(|grant| language.text(grant_label(*grant))).collect();
+            let granted: Vec<_> = plugin
+                .grants
+                .iter()
+                .map(|grant| {
+                    let label = if *grant == Grant::WorkspaceUi
+                        && plugin.workspace.as_ref().is_some_and(|ui| {
+                            ui.scratch_terminal && ui.sidebar.is_none() && ui.tab_menu.is_empty()
+                        }) {
+                        Message::SettingsPluginsGrantScratchTerminal
+                    } else {
+                        grant_label(*grant)
+                    };
+                    language.text(label)
+                })
+                .collect();
             text =
                 text.child(div().text_xs().text_color(muted).child(
                     language.format(

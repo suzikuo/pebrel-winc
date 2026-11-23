@@ -24,6 +24,9 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.handle_scratch_event(view, event, window, cx) {
+            return;
+        }
         match event {
             TerminalViewEvent::SessionIdentityChanged => {
                 if let Err(error) = windowing::save_current_window_session(

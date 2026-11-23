@@ -704,9 +704,9 @@ impl NebulaWorkspace {
             })
             .enumerate()
             .map(|(index, item)| {
-                let extra = if index == 0 { 0.0 } else { row_layout.extra_gap_before(tabs_scroll + index) };
-                if extra > 0.0 {
-                    div().flex_shrink_0().pt(px(extra)).child(item).into_any_element()
+                let gap = if index == 0 { 0.0 } else { row_layout.gap_before(tabs_scroll + index) };
+                if gap > 0.0 {
+                    div().flex_shrink_0().pt(px(gap)).child(item).into_any_element()
                 } else {
                     item
                 }
@@ -1036,6 +1036,7 @@ impl NebulaWorkspace {
                 self.title_bar_right_controls(cx)
                     .when_some(broadcast_button, |controls, button| controls.child(button))
                     .child(self.render_terminal_find_button(settings_active, cx))
+            .children(self.scratch_button(cx))
                     .child(
                         toolbar_button(
                             "toggle-command-manager",

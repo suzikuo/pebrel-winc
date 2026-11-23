@@ -15,7 +15,7 @@ use crate::gpui_shell::prelude::*;
 use crate::plugins::workspace::SidebarStyle;
 use crate::scrollbar::{self, OverlayScrollbar};
 
-use pebrel_settings::DensityName;
+use pebrel_settings::{DensityName, SidebarGap, SidebarSpacing};
 
 use super::{NebulaWorkspace, tab_groups::SidebarRow};
 
@@ -55,28 +55,41 @@ struct RowBand {
 
 pub(super) struct SidebarRowLayout {
     bands: Vec<RowBand>,
-    gap: f32,
 }
 
 impl SidebarRowLayout {
-    pub(super) fn new(rows: &[SidebarRow], density: DensityName, style: SidebarStyle) -> Self {
+    pub(super) fn new(
+        rows: &[SidebarRow],
+        density: DensityName,
+        style: SidebarStyle,
+        spacing: SidebarSpacing,
+    ) -> Self {
         let gap = tab_row_gap(density);
-        let section_gap = style.section_gap.map_or(SECTION_GAP, f32::from);
+        let section_gap = gap + style.section_gap.map_or(SECTION_GAP, f32::from);
         let mut offset = 0.0;
         let bands = rows
             .iter()
             .enumerate()
             .map(|(index, &row)| {
-                if index > 0 && matches!(row, SidebarRow::Group(_) | SidebarRow::Ungrouped) {
-                    offset += section_gap;
+                if index > 0 {
+                    let (kind, fallback) = match (rows[index - 1], row) {
+                        (_, SidebarRow::Ungrouped) => (SidebarGap::BeforeUngrouped, section_gap),
+                        (SidebarRow::Tab(..), SidebarRow::Group(_)) => {
+                            (SidebarGap::TabToGroup, section_gap)
+                        },
+                        (_, SidebarRow::Group(_)) => (SidebarGap::Headings, section_gap),
+                        (SidebarRow::Tab(..), SidebarRow::Tab(..)) => (SidebarGap::Tabs, gap),
+                        (_, SidebarRow::Tab(..)) => (SidebarGap::HeadingToTab, gap),
+                    };
+                    offset += spacing.get(kind).map_or(fallback, f32::from);
                 }
                 let top = offset;
                 let bottom = top + sidebar_row_height(row, density, style);
-                offset = bottom + gap;
+                offset = bottom;
                 RowBand { top, bottom }
             })
             .collect();
-        Self { bands, gap }
+        Self { bands }
     }
 
     pub(super) fn row_height(&self, index: usize) -> f32 {
@@ -88,8 +101,8 @@ impl SidebarRowLayout {
         self.bands[index].bottom - self.bands[scroll].top
     }
 
-    pub(super) fn extra_gap_before(&self, index: usize) -> f32 {
-        self.bands[index].top - self.bands[index - 1].bottom - self.gap
+    pub(super) fn gap_before(&self, index: usize) -> f32 {
+        self.bands[index].top - self.bands[index - 1].bottom
     }
 
     fn content_height(&self) -> f32 {
@@ -163,11 +176,19 @@ struct TabsWindow {
 impl NebulaWorkspace {
     pub(super) fn tab_row_pitch(&self) -> f32 {
         sidebar_row_height(SidebarRow::Tab(0, None), self.density, self.plugin_workspace.sidebar)
-            + tab_row_gap(self.density)
+            + self
+                .sidebar_spacing
+                .get(SidebarGap::Tabs)
+                .map_or(tab_row_gap(self.density), f32::from)
     }
 
     pub(super) fn sidebar_row_layout_for(&self, rows: &[SidebarRow]) -> SidebarRowLayout {
-        SidebarRowLayout::new(rows, self.density, self.plugin_workspace.sidebar)
+        SidebarRowLayout::new(
+            rows,
+            self.density,
+            self.plugin_workspace.sidebar,
+            self.sidebar_spacing,
+        )
     }
 
     fn sidebar_row_layout(&self) -> SidebarRowLayout {
@@ -345,7 +366,7 @@ impl NebulaWorkspace {
                 .absolute()
                 .size_full(),
             )
-            .child(v_flex().w_full().gap(px(tab_row_gap(self.density))).children(items))
+            .child(v_flex().w_full().children(items))
             .when_some(bar.filter(|_| show_thumb), |list, bar| {
                 list.child(tabs_scroll_thumb(&bar, thumb_color))
             })
@@ -424,12 +445,20 @@ impl NebulaWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{DensityName, SidebarRow, SidebarRowLayout, SidebarStyle, apply_wheel, wheel_rows};
+    use super::{
+        DensityName, SidebarRow, SidebarRowLayout, SidebarSpacing, SidebarStyle, apply_wheel,
+        tab_row_gap, wheel_rows,
+    };
 
     #[test]
     fn compact_rows_fit_more_tabs_without_shrinking_hit_targets() {
         for (density, expected_show) in [(DensityName::Standard, 2), (DensityName::Compact, 3)] {
-            let layout = SidebarRowLayout::new(&[SidebarRow::Tab(0, None); 10], density, SidebarStyle::default());
+            let layout = SidebarRowLayout::new(
+                &[SidebarRow::Tab(0, None); 10],
+                density,
+                SidebarStyle::default(),
+                SidebarSpacing::default(),
+            );
             assert_eq!(layout.row_height(0), 32.0);
             assert_eq!(layout.visible_end(0, 104.0), expected_show);
             assert_eq!(layout.first_fitting_start(9, 104.0), 10 - expected_show);
@@ -448,7 +477,8 @@ mod tests {
             section_gap: Some(10),
             ..Default::default()
         };
-        let layout = SidebarRowLayout::new(&rows, DensityName::Standard, style);
+        let layout =
+            SidebarRowLayout::new(&rows, DensityName::Standard, style, SidebarSpacing::default());
         assert_eq!(layout.row_height(0), 48.0);
         assert_eq!(layout.row_height(1), 36.0);
         assert_eq!(layout.visible_end(0, 92.0), 2);
@@ -460,22 +490,60 @@ mod tests {
     fn section_gaps_count_toward_the_viewport_only_between_visible_rows() {
         use SidebarRow::{Group, Tab, Ungrouped};
         let rows = [Group(0), Tab(0, Some(0)), Group(1), Ungrouped, Tab(1, None)];
-        let layout = SidebarRowLayout::new(&rows, DensityName::Standard, SidebarStyle::default());
+        let layout = SidebarRowLayout::new(
+            &rows,
+            DensityName::Standard,
+            SidebarStyle::default(),
+            SidebarSpacing::default(),
+        );
         let group = layout.row_height(0);
         let tab = layout.row_height(1);
+        let gap = tab_row_gap(DensityName::Standard);
         assert_eq!((group, tab), (42.0, 32.0));
-        assert_eq!(layout.extra_gap_before(1), 0.0);
-        assert_eq!(layout.extra_gap_before(2), 6.0);
-        assert_eq!(layout.extra_gap_before(3), 6.0);
-        assert_eq!(layout.extra_gap_before(4), 0.0);
-        assert_eq!(layout.content_height(), 2.0 * group + 3.0 * tab + 4.0 * layout.gap + 12.0);
-        let group_and_tab = group + tab + layout.gap;
+        assert_eq!(layout.gap_before(1), gap);
+        assert_eq!(layout.gap_before(2), gap + 6.0);
+        assert_eq!(layout.gap_before(3), gap + 6.0);
+        assert_eq!(layout.gap_before(4), gap);
+        assert_eq!(layout.content_height(), 2.0 * group + 3.0 * tab + 4.0 * gap + 12.0);
+        let group_and_tab = group + tab + gap;
         assert_eq!(layout.visible_end(0, group_and_tab), 2);
         assert_eq!(layout.visible_end(1, group_and_tab), 2);
         assert_eq!(layout.visible_end(2, group_and_tab + 6.0), 4);
-        let two_tabs = 2.0 * tab + layout.gap;
+        let two_tabs = 2.0 * tab + gap;
         assert_eq!(layout.first_fitting_start(4, two_tabs), 3);
         assert_eq!(layout.visible_end(3, two_tabs), 5);
+    }
+
+    #[test]
+    fn custom_gaps_are_used_for_layout_scroll_and_drop_bands() {
+        use SidebarRow::{Group, Tab, Ungrouped};
+        let rows = [
+            Group(0),
+            Group(1),
+            Tab(0, Some(1)),
+            Tab(1, Some(1)),
+            Group(2),
+            Ungrouped,
+            Tab(2, None),
+        ];
+        let raw = pebrel_settings::RawSettings::from_text(
+            "sidebar_gap_headings=19\nsidebar_gap_heading_to_tab=7\nsidebar_gap_tabs=0\nsidebar_gap_tab_to_group=31\nsidebar_gap_before_ungrouped=24\n",
+        );
+        let spacing = SidebarSpacing::from_raw(&raw);
+        let style = SidebarStyle { section_gap: Some(12), ..Default::default() };
+        let layout = SidebarRowLayout::new(&rows, DensityName::Compact, style, spacing);
+        let gaps: Vec<_> = (1..rows.len()).map(|index| layout.gap_before(index)).collect();
+        assert_eq!(gaps, [19.0, 7.0, 0.0, 31.0, 24.0, 7.0]);
+        for index in 1..rows.len() {
+            let before = layout.row_bottom(index - 1, 0);
+            let next = before + layout.gap_before(index);
+            assert_eq!(layout.visible_end(0, before), index);
+            if next > before {
+                assert_eq!(layout.row_at((before + next) / 2.0, 0, rows.len()), None);
+            }
+            assert_eq!(layout.row_at(next, 0, rows.len()), Some(index));
+        }
+        assert_eq!(layout.row_bottom(1, 1), 38.0);
     }
 
     #[test]

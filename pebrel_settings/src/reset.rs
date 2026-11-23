@@ -106,6 +106,11 @@ const RESET_KEYS: &[&str] = &[
     "ssh_proxy_no_proxy",
     "quick_terminal_hotkey",
     "quick_terminal_mode",
+    crate::ScratchTerminal::PLACEMENT,
+    crate::ScratchTerminal::SIZE,
+    crate::ScratchTerminal::FONT_SIZE,
+    crate::ScratchTerminal::INHERIT_DIRECTORY,
+    crate::ScratchTerminal::ESCAPE_TO_HIDE,
     "quick_terminal_width",
     "quick_terminal_height",
     "pane_card_radius",
@@ -125,7 +130,9 @@ fn default_settings_text(text: &str) -> String {
     text.split_inclusive('\n')
         .filter(|line| {
             !line.split_once('=').is_some_and(|(key, _)| {
-                RESET_KEYS.iter().any(|known| key.trim().eq_ignore_ascii_case(known))
+                let key = key.trim();
+                RESET_KEYS.iter().any(|known| key.eq_ignore_ascii_case(known))
+                    || crate::SidebarGap::ALL.iter().any(|gap| key.eq_ignore_ascii_case(gap.key()))
             })
         })
         .collect()
@@ -166,6 +173,29 @@ fn restore_defaults_at(path: &Path) -> io::Result<Option<PathBuf>> {
 mod tests {
     use super::*;
     use crate::{RawSettings, RuntimeSettings};
+
+    #[test]
+    fn sidebar_spacing_round_trips_and_reset_restores_inheritance() {
+        use crate::{SidebarGap, SidebarSpacing};
+        let updates = SidebarGap::ALL.map(|gap| (gap.key(), format!("{}", gap as u8)));
+        let text = crate::apply_updates("custom=keep\n", &updates);
+        let runtime = RuntimeSettings::from_raw(&RawSettings::from_text(&text));
+        for (index, gap) in SidebarGap::ALL.into_iter().enumerate() {
+            assert_eq!(runtime.sidebar_spacing.get(gap), Some(index as u8));
+        }
+        assert_eq!(default_settings_text(&text), "custom=keep\n");
+        assert_eq!(
+            SidebarSpacing::from_raw(&RawSettings::from_text(&default_settings_text(&text))),
+            SidebarSpacing::default()
+        );
+        let overrides = SidebarSpacing::from_raw(&RawSettings::from_text(
+            "sidebar_gap_tabs=48\nsidebar_gap_heading_to_tab=49\nsidebar_gap_headings=-1\nsidebar_gap_tab_to_group=1.5\nsidebar_gap_before_ungrouped=\n",
+        ));
+        assert_eq!(overrides.get(SidebarGap::Tabs), Some(48));
+        for gap in SidebarGap::ALL.into_iter().skip(1) {
+            assert_eq!(overrides.get(gap), None);
+        }
+    }
 
     #[test]
     fn reset_restores_auto_scrollbar_visibility() {

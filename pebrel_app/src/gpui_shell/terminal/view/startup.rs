@@ -399,6 +399,7 @@ impl TerminalView {
                 ligatures,
             ),
             font_size,
+            scratch_font_subscription: None,
             ligatures,
             cell_width_mode,
             font_offset_x,

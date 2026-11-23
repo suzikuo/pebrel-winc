@@ -220,11 +220,33 @@
       "unsupported_format": "This reader supports PNG / JPEG images only."
     }
   },
+  "scratch": {
+    "terminal_title": "Scratch terminal",
+    "terminal_shortcut": "Toggle scratch terminal (Ctrl+Alt+J)",
+    "terminal_hide": "Hide and keep shell running",
+    "terminal_end": "Close scratch terminal",
+    "terminal_end_all": "Close all scratch shells",
+    "terminal_end_all_running": "A scratch shell is still running a command. Close all scratch shells in this tab?",
+    "font_size": "Scratch terminal font size",
+    "font_size_help": "Applies to all scratch shells. Ctrl+scroll over a scratch shell to adjust it here. Reset to use the base font size.",
+    "terminal_add": "New scratch shell",
+    "terminal_drag": "Drag to move the panel. Double-click to reset its position and size.",
+    "terminal_session": "Shell {number}",
+    "placement": "Position",
+    "placement_docked": "Docked below",
+    "placement_bottom": "Floating below",
+    "placement_right": "Floating right",
+    "size": "Size",
+    "inherit_directory": "Start in the focused pane’s directory",
+    "inherit_directory_help": "Applies the next time you start a scratch shell.",
+    "escape": "Esc hides the scratch terminal",
+    "escape_help": "Applies when the scratch terminal has focus. Leave off to send Esc to the shell."
+  },
   "settings": {
     "search": {
       "terms": {
         "application": "application app update version github support",
-        "appearance": "appearance ligatures theme custom template import export font opacity background blur language shader wgsl glsl terminal effects effect video gif cursor smooth motion icon dim inactive panes scrollback scrolling speed history ctrl wheel zoom",
+        "appearance": "appearance sidebar tab group gap spacing ligatures theme custom template import export font opacity background blur language shader wgsl glsl terminal effects effect video gif cursor smooth motion icon dim inactive panes scrollback scrolling speed history ctrl wheel zoom",
         "profiles": "profiles shell terminal completion command history clear startup environment refresh path ai message notifications toast alerts bell duration timeout persistent auto-dismiss automatic command output views render structured",
         "providers": "providers provider ai api prediction prompt suggestions",
         "ssh": "ssh host remote connection",
@@ -367,6 +389,17 @@
         "jump_channel": "Could not open an outbound channel through SSH jump host {target}: {error}",
         "direct": "Could not connect directly to the test site: {error}"
       }
+    },
+    "sidebar_spacing": {
+      "title": "Sidebar tab spacing",
+      "description": "Click a value to enter a gap from 0 to 48 px. Auto follows the appearance defaults.",
+      "tabs": "Between tabs",
+      "heading_to_tab": "From a heading to its first tab",
+      "headings": "Between adjacent group headings",
+      "tab_to_group": "From the last tab to the next group",
+      "before_ungrouped": "Before the Ungrouped heading",
+      "edit": "Edit spacing",
+      "invalid": "Enter a whole number from 0 to {max}, or leave the field empty for Auto."
     },
     "appearance": {
       "background_color_description": "Overrides the terminal background supplied by the theme. This also changes the color reported to applications by OSC 11, which TUIs use to choose light or dark mode.",
@@ -593,6 +626,7 @@
       "grant_allow": "Allow and install",
       "grant_cancel": "Cancel",
       "grant_workspace_ui": "Customize the sidebar and add menu commands that can modify the selected terminal tab when clicked",
+      "grant_scratch_terminal": "Add a temporary shell you can open from the current terminal tab",
       "grant_directory_launcher": "Run the listed Windows executable and arguments when you choose its command for the current directory",
       "launcher_windows": "{title} · Windows: {path} {args}",
       "launcher_wsl": "WSL arguments: {args}",

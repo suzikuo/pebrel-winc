@@ -1,3 +1,4 @@
+use super::appearance::FontSizeTarget;
 use super::*;
 
 impl SettingsPane {
@@ -87,7 +88,7 @@ impl SettingsPane {
                 Input::new(&self.ui_font_family_input).w(px(240.0)),
                 cx,
             ))
-            .child(self.font_size_row(true, cx))
+            .child(self.font_size_row(FontSizeTarget::Interface, cx))
             .child(self.switch_row(
                 "dim_inactive_panes",
                 language.text(crate::i18n::Message::SettingsPanesDimInactive),
@@ -141,7 +142,7 @@ impl SettingsPane {
                 cjk_font_picker,
                 cx,
             ))
-            .child(self.font_size_row(false, cx))
+            .child(self.font_size_row(FontSizeTarget::Terminal, cx))
             .child(self.switch_row(
                 "ctrl_wheel_font_zoom",
                 language.text(crate::i18n::Message::SettingsFontCtrlWheelZoom),

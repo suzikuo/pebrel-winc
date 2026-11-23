@@ -1,5 +1,47 @@
 use super::appearance_picker::AppearanceColors;
 use super::*;
+use crate::i18n::Message;
+use pebrel_settings::ScratchTerminal;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FontSizeTarget {
+    Interface,
+    Terminal,
+    Scratch,
+}
+
+impl FontSizeTarget {
+    fn setting(self) -> (&'static str, std::ops::RangeInclusive<f32>) {
+        match self {
+            Self::Interface => ("ui_font_size", 10.0..=24.0),
+            Self::Terminal => ("font_size", 4.0..=96.0),
+            Self::Scratch => (ScratchTerminal::FONT_SIZE, ScratchTerminal::FONT_SIZE_RANGE),
+        }
+    }
+
+    fn size(self, pane: &SettingsPane, cx: &App) -> f32 {
+        match self {
+            Self::Interface => pane.font_size_px(cx),
+            Self::Terminal => pane.terminal_font_size_px(cx),
+            Self::Scratch => {
+                cx.global::<crate::gpui_shell::config::Settings>().scratch_font_size_px()
+            },
+        }
+    }
+
+    fn messages(self) -> (Message, Message) {
+        match self {
+            Self::Interface => {
+                (Message::SettingsFontUiSize, Message::SettingsFontUiSizeDescription)
+            },
+            Self::Terminal => (
+                Message::SettingsAppearanceTerminalFontSizeCtrlWheel,
+                Message::SettingsAppearanceChangesOnlyTheTerminalText,
+            ),
+            Self::Scratch => (Message::ScratchFontSize, Message::ScratchFontSizeHelp),
+        }
+    }
+}
 
 impl SettingsPane {
     pub(super) fn finish_font_size_edit(
@@ -8,15 +50,17 @@ impl SettingsPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(ui) = self.font_size_editing.take() else { return };
+        let Some(target) = self.font_size_editing.take() else { return };
         if apply {
             let value = self.font_size_input.read(cx).value();
-            if let Ok(size) = value.trim().parse::<f32>() {
-                if size.is_finite() {
-                    let (key, min, max) =
-                        if ui { ("ui_font_size", 10.0, 24.0) } else { ("font_size", 4.0, 96.0) };
-                    self.persist(&[(key, format!("{:.2}", size.clamp(min, max)))], cx);
-                }
+            if let Ok(size) = value.trim().parse::<f32>()
+                && size.is_finite()
+            {
+                let (key, range) = target.setting();
+                self.persist(
+                    &[(key, format!("{:.2}", size.clamp(*range.start(), *range.end())))],
+                    cx,
+                );
             }
         }
         if self.font_size_input.read(cx).focus_handle(cx).is_focused(window) {
@@ -124,11 +168,17 @@ impl SettingsPane {
             .into_any_element()
     }
 
-    pub(super) fn font_size_row(&self, ui: bool, cx: &Context<Self>) -> gpui::AnyElement {
+    pub(super) fn font_size_row(
+        &self,
+        target: FontSizeTarget,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let language = crate::gpui_shell::config::ui_language(cx);
-        let size = if ui { self.font_size_px(cx) } else { self.terminal_font_size_px(cx) };
-        let (key, min, max) =
-            if ui { ("ui_font_size", 10.0, 24.0) } else { ("font_size", 4.0, 96.0) };
+        let (title, description) = target.messages();
+        let (label, help) = (language.text(title), language.text(description));
+        let size = target.size(self, cx);
+        let (key, range) = target.setting();
+        let (min, max) = (*range.start(), *range.end());
         let stepper = h_flex()
             .w(px(142.0))
             .h(px(36.0))
@@ -139,26 +189,25 @@ impl SettingsPane {
                     .ghost()
                     .size(px(34.0))
                     .disabled(size <= min)
-                    .tooltip(language.text(crate::i18n::Message::CommonDecreaseFont))
+                    .aria_label(language.text(Message::CommonDecreaseFont))
+                    .tooltip(language.text(Message::CommonDecreaseFont))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        let size =
-                            if ui { this.font_size_px(cx) } else { this.terminal_font_size_px(cx) };
-                        let next = (size.ceil() - 1.0).clamp(min, max);
+                        let next = (target.size(this, cx).ceil() - 1.0).clamp(min, max);
                         this.persist(&[(key, format!("{next:.2}"))], cx);
                     })),
             )
-            .child(if self.font_size_editing == Some(ui) {
+            .child(if self.font_size_editing == Some(target) {
                 Input::new(&self.font_size_input)
                     .appearance(false)
                     .focus_bordered(false)
                     .cleanable(false)
                     .w(px(74.0))
                     .h(px(34.0))
-                    .aria_label(language.text(if ui {
-                        crate::i18n::Message::SettingsFontUiSize
+                    .aria_label(if target == FontSizeTarget::Terminal {
+                        language.text(Message::CommonFontSize)
                     } else {
-                        crate::i18n::Message::CommonFontSize
-                    }))
+                        label
+                    })
                     .into_any_element()
             } else {
                 Button::new(SharedString::from(format!("{key}-edit")))
@@ -168,7 +217,7 @@ impl SettingsPane {
                     .h(px(34.0))
                     .label(format!("{size} px"))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.font_size_editing = Some(ui);
+                        this.font_size_editing = Some(target);
                         this.font_size_input.update(cx, |input, cx| {
                             let value = size.to_string();
                             input.set_value(value.clone(), window, cx);
@@ -185,29 +234,34 @@ impl SettingsPane {
                     .ghost()
                     .size(px(34.0))
                     .disabled(size >= max)
-                    .tooltip(language.text(crate::i18n::Message::CommonIncreaseFont))
+                    .aria_label(language.text(Message::CommonIncreaseFont))
+                    .tooltip(language.text(Message::CommonIncreaseFont))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        let size =
-                            if ui { this.font_size_px(cx) } else { this.terminal_font_size_px(cx) };
-                        let next = (size.floor() + 1.0).clamp(min, max);
+                        let next = (target.size(this, cx).floor() + 1.0).clamp(min, max);
                         this.persist(&[(key, format!("{next:.2}"))], cx);
                     })),
             );
-        self.row(
-            if ui {
-                language.text(crate::i18n::Message::SettingsFontUiSize)
-            } else {
-                language.text(crate::i18n::Message::SettingsAppearanceTerminalFontSizeCtrlWheel)
-            },
-            if ui {
-                language.text(crate::i18n::Message::SettingsFontUiSizeDescription)
-            } else {
-                language.text(crate::i18n::Message::SettingsAppearanceChangesOnlyTheTerminalText)
-            },
-            stepper,
-            cx,
-        )
-        .into_any_element()
+        if target == FontSizeTarget::Scratch {
+            let settings = cx.global::<crate::gpui_shell::config::Settings>();
+            self.row_with_reset(
+                label,
+                help,
+                settings.scratch_font_size_override.is_some(),
+                |this, window, cx| {
+                    this.save_scratch_setting(
+                        ScratchTerminal::FONT_SIZE,
+                        String::new(),
+                        window,
+                        cx,
+                    );
+                },
+                stepper,
+                cx,
+            )
+            .into_any_element()
+        } else {
+            self.row(label, help, stepper, cx).into_any_element()
+        }
     }
 
     pub(super) fn section_appearance(
@@ -245,7 +299,12 @@ impl SettingsPane {
                 ),
             );
         let settings = self.appearance_advanced_settings(window, cx);
-        v_flex().w_full().gap(px(GROUP_GAP)).child(selectors).child(settings)
+        v_flex()
+            .w_full()
+            .gap(px(GROUP_GAP))
+            .child(selectors)
+            .child(self.sidebar_spacing_settings(cx))
+            .child(settings)
     }
 }
 

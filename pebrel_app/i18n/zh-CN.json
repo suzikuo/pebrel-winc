@@ -220,11 +220,33 @@
       "unsupported_format": "本版阅读视图仅支持 PNG / JPEG 图片。"
     }
   },
+  "scratch": {
+    "terminal_title": "临时终端",
+    "terminal_shortcut": "展开或收起临时终端（Ctrl+Alt+J）",
+    "terminal_hide": "收起并保留 Shell",
+    "terminal_end": "关闭临时终端",
+    "terminal_end_all": "关闭全部临时 Shell",
+    "terminal_end_all_running": "有临时 Shell 正在运行命令。要关闭当前标签页的全部临时 Shell 吗？",
+    "font_size": "临时终端字号",
+    "font_size_help": "适用于所有临时 Shell。在临时终端内按住 Ctrl 滚动也会调整此字号。恢复默认后使用基础字号。",
+    "terminal_add": "新建临时 Shell",
+    "terminal_drag": "拖动可移动浮层，双击可恢复默认位置和大小。",
+    "terminal_session": "Shell {number}",
+    "placement": "显示位置",
+    "placement_docked": "底部停靠",
+    "placement_bottom": "底部浮层",
+    "placement_right": "右侧浮层",
+    "size": "大小",
+    "inherit_directory": "在当前窗格的目录启动",
+    "inherit_directory_help": "下次新建临时 Shell 时生效。",
+    "escape": "按 Esc 收起临时终端",
+    "escape_help": "临时终端获得焦点时生效。关闭此项时，Esc 仍可发送给 Shell。"
+  },
   "settings": {
     "search": {
       "terms": {
         "application": "应用 更新 版本 支持",
-        "appearance": "连字 外观 主题 自定义 模板 导入 导出 字体 透明度 背景 背景模糊 模糊 语言 显示语言 终端效果 着色器 视频 动图 光标 平滑 动画 图标 调暗非活动窗格 分屏变暗 回滚 滚动 速度 历史 滚轮 缩放",
+        "appearance": "连字 外观 侧栏 标签 分组 组间距 标签间隔 主题 自定义 模板 导入 导出 字体 透明度 背景 背景模糊 模糊 语言 显示语言 终端效果 着色器 视频 动图 光标 平滑 动画 图标 调暗非活动窗格 分屏变暗 回滚 滚动 速度 历史 滚轮 缩放",
         "profiles": "配置文件 终端 补全 命令历史 清除历史 启动 环境变量 刷新 提醒 通知 弹窗 消息 右下角 ai消息通知 ai 消息通知 ai消息弹窗 ai 消息弹窗 铃声 时长 秒 常驻 自动关闭 命令输出 命令输出视图 命令输出自动渲染 自动结果视图 结构化视图 原始颜色",
         "providers": "供应商 服务商 模型 补齐 预测",
         "ssh": "主机 远程 连接",
@@ -367,6 +389,17 @@
         "jump_channel": "经跳板 {target} 打开出网通道失败：{error}",
         "direct": "直接连接测试站点失败：{error}"
       }
+    },
+    "sidebar_spacing": {
+      "title": "侧栏标签间距",
+      "description": "点击数值可输入 0–48 px 的间距，设为「自动」时跟随外观默认值。",
+      "tabs": "标签与标签之间",
+      "heading_to_tab": "组标题与首个标签之间",
+      "headings": "相邻的组标题之间",
+      "tab_to_group": "最后一个标签与下一组之间",
+      "before_ungrouped": "「未分组」标题之前",
+      "edit": "编辑间距",
+      "invalid": "请输入 0 到 {max} 之间的整数，留空可恢复「自动」。"
     },
     "appearance": {
       "background_color_description": "覆盖主题自带的终端底色。改了它，OSC 11 上报给程序的背景色也跟着变——TUI 判断明暗模式靠的就是这个值。",
@@ -593,6 +626,7 @@
       "grant_allow": "允许并安装",
       "grant_cancel": "取消",
       "grant_workspace_ui": "自定义侧栏，并添加可在你点击时修改所选终端标签的菜单命令",
+      "grant_scratch_terminal": "在当前终端标签中提供由你打开的临时命令行",
       "grant_directory_launcher": "选择插件命令时，允许使用当前目录启动下列 Windows 程序并传入所列参数",
       "launcher_windows": "{title} · Windows：{path} {args}",
       "launcher_wsl": "WSL 参数：{args}",

@@ -66,6 +66,10 @@ impl NebulaWorkspace {
                 };
                 #[cfg(windows)]
                 this.plugin_workspace.toolbar.load_entries(&plugins);
+                this.scratch.set_available(plugins.iter().any(|plugin| {
+                    plugin.enabled
+                        && plugin.workspace.as_ref().is_some_and(|ui| ui.scratch_terminal)
+                }));
                 this.plugin_workspace.sidebar = plugins
                     .iter()
                     .filter(|plugin| plugin.enabled)

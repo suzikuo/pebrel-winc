@@ -53,7 +53,7 @@ pebrel plugin uninstall example.theme-generator
   remains a separate user action.
 - `directory_launcher` authorizes the displayed executable and arguments for a Windows
   title-bar button. See [Directory launchers](#directory-launchers).
-- `workspace_ui` authorizes sidebar styling and tab menu entries. See
+- `workspace_ui` authorizes sidebar styling, tab menu entries, and opting into the native scratch terminal. See
   [Workspace contributions](#workspace-contributions).
 - `run` accepts an installed ID when no path of that name exists. Disabled plugins do not run.
   Running a package directory never carries grants.
@@ -109,6 +109,8 @@ show_group_new_tab = true   # expanded groups
 Each field is optional and omitted fields use native defaults. The enabled plugin with the first
 lexicographic ID that declares a sidebar style supplies the whole style. Tab menu commands from all
 enabled plugins appear under **Plugins** when right-clicking a terminal tab in either tab layout.
+**Appearance → Sidebar tab spacing** overrides the gaps individually. Auto uses the interface
+density and the plugin's section spacing when available.
 Menus can declare up to 12 unique command IDs per plugin. Style-only packages may omit commands and
 Luau. Window opening, activation, and changes in Settings → Plugins refresh the contribution list.
 
@@ -130,6 +132,16 @@ Menu handlers run in a fresh bounded VM on the background executor with a 250 ms
 They receive the tab context only when clicked. Runtime transport is unavailable to menu handlers.
 `plugin run` returns JSON through the CLI and does not apply workspace actions. Disabling the plugin
 removes its UI contributions. Applied changes to names and groups follow the normal session rules.
+
+### Scratch terminal
+
+The [Scratch Terminal example](../../examples/plugins/scratch-terminal/) declares
+`[workspace]` with `scratch_terminal = true`. It needs no commands or Luau. The host
+adds a title-bar toggle and the workspace shortcut Ctrl+Alt+J. Opening the panel is
+an explicit user action. The host launches local or WSL shells using the user’s
+preferences. Each tab can hold multiple independent shells. No plugin receives the cwd
+or can drive the shell. Installed plugins with this contribution share the native
+settings under **Settings → Plugins → Scratch terminal**.
 
 ## Theme contributions
 
