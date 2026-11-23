@@ -1,4 +1,5 @@
 use super::*;
+use crate::gpui_shell::wallpaper::workspace_strip::WorkspaceStrip;
 use crate::{
     gpui_shell::widgets::toolbar_button, i18n::Message, platform::window_chrome::TitleBarLayout,
 };
@@ -18,16 +19,25 @@ pub(super) fn effective_title_bar_height(
 /// Prepaint records the actual pane column before any titlebar paint runs. Keep
 /// this cell for the workspace lifetime, so resizing and panel animations do not
 /// allocate a new shared slot or duplicate the body's layout calculations.
-#[derive(Clone, Default)]
-pub(super) struct TitleBarBackground(Rc<std::cell::Cell<Option<Bounds<Pixels>>>>);
+#[derive(Clone)]
+pub(super) struct WindowBackdrop {
+    pane: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    pub(super) wallpaper: Entity<WorkspaceStrip>,
+}
 
-impl TitleBarBackground {
+impl WindowBackdrop {
+    pub(super) fn new(cx: &mut Context<NebulaWorkspace>) -> Self {
+        let wallpaper = cx.new(WorkspaceStrip::new);
+        cx.observe(&wallpaper, |_, _, cx| cx.notify()).detach();
+        Self { pane: Rc::default(), wallpaper }
+    }
+
     pub(super) fn record_pane(&self, bounds: Bounds<Pixels>) {
-        self.0.set(Some(bounds));
+        self.pane.set(Some(bounds));
     }
 
     fn element(&self, top_tabs: bool) -> gpui::Canvas<()> {
-        let pane_bounds = self.0.clone();
+        let pane_bounds = self.pane.clone();
         canvas(
             |_, _, _| (),
             move |bounds, _, window, cx| {
@@ -195,7 +205,7 @@ impl NebulaWorkspace {
 
         title_bar_frame()
             .debug_selector(|| "workspace-titlebar".to_owned())
-            .when(!settings_active, |title| title.child(self.titlebar_background.element(top_tabs)))
+            .when(!settings_active, |title| title.child(self.window_backdrop.element(top_tabs)))
             .child(bar)
     }
 }
@@ -237,40 +247,66 @@ mod tests {
         });
         let workspace = workspace.unwrap();
         window.simulate_resize(gpui::size(px(1200.0), px(800.0)));
-        for position in
-            [pebrel_settings::TabsPositionName::Sidebar, pebrel_settings::TabsPositionName::Top]
-        {
-            window.update(|window, cx| {
-                workspace.update(cx, |workspace, cx| {
-                    workspace.tabs_position = position;
-                    #[cfg(windows)]
-                    workspace.set_test_plugin_toolbar(true);
-                    cx.notify();
-                });
-                window.draw(cx).clear(cx);
-            });
-            let find = window.debug_bounds("terminal-find").unwrap();
-            let commands = window.debug_bounds("command-manager-toggle").unwrap();
-            assert!(find.right() < commands.left(), "{position:?}");
-            #[cfg(windows)]
+        for mode in [gpui_component::ThemeMode::Dark, gpui_component::ThemeMode::Light] {
+            for position in
+                [pebrel_settings::TabsPositionName::Sidebar, pebrel_settings::TabsPositionName::Top]
             {
-                let selector = "directory-launcher/example.directory-launcher/open-directory";
-                let launcher = window.debug_bounds(selector).unwrap();
-                assert_eq!(launcher.size, find.size, "{position:?}");
-                assert_eq!(launcher.center().y, find.center().y, "{position:?}");
-                assert_eq!(
-                    find.left() - launcher.right(),
-                    px(TITLE_BAR_CONTROL_GAP),
-                    "{position:?}"
-                );
-                window.update(|window, cx| {
-                    workspace.update(cx, |workspace, cx| {
-                        workspace.set_test_plugin_toolbar(false);
-                        cx.notify();
+                for fullscreen in [false, true, false, true, false] {
+                    window.update(|window, cx| {
+                        if window.is_fullscreen() != fullscreen {
+                            window.toggle_fullscreen();
+                        }
+                        gpui_component::Theme::change(mode, Some(window), cx);
+                        workspace.update(cx, |workspace, cx| {
+                            workspace.tabs_position = position;
+                            #[cfg(windows)]
+                            workspace.set_test_plugin_toolbar(true);
+                            cx.notify();
+                        });
+                        window.draw(cx).clear(cx);
                     });
-                    window.draw(cx).clear(cx);
-                });
-                assert!(window.debug_bounds(selector).is_none(), "{position:?}");
+                    // The app's controls must keep their row in full screen.
+                    // TestWindow cannot verify the AppKit overlay's transparency.
+                    let title = window.debug_bounds("workspace-titlebar").unwrap();
+                    let find = window.debug_bounds("terminal-find").unwrap();
+                    let commands = window.debug_bounds("command-manager-toggle").unwrap();
+                    assert!(find.right() < commands.left(), "{position:?}, {fullscreen}");
+                    assert!(find.top() >= title.top() && find.bottom() <= title.bottom());
+                    assert!(commands.top() >= title.top() && commands.bottom() <= title.bottom());
+                    let expected_height = if crate::platform::Platform::current()
+                        == crate::platform::Platform::MacOS
+                    {
+                        52.0
+                    } else {
+                        48.0
+                    };
+                    assert_eq!(title.size.height, px(expected_height));
+                    #[cfg(windows)]
+                    {
+                        let selector =
+                            "directory-launcher/example.directory-launcher/open-directory";
+                        let launcher = window.debug_bounds(selector).unwrap();
+                        assert_eq!(launcher.size, find.size, "{position:?}, {fullscreen}");
+                        assert_eq!(
+                            launcher.center().y,
+                            find.center().y,
+                            "{position:?}, {fullscreen}"
+                        );
+                        assert_eq!(find.left() - launcher.right(), px(TITLE_BAR_CONTROL_GAP));
+                    }
+                }
+                #[cfg(windows)]
+                {
+                    window.update(|window, cx| {
+                        workspace.update(cx, |workspace, cx| {
+                            workspace.set_test_plugin_toolbar(false);
+                            cx.notify();
+                        });
+                        window.draw(cx).clear(cx);
+                    });
+                    let selector = "directory-launcher/example.directory-launcher/open-directory";
+                    assert!(window.debug_bounds(selector).is_none(), "{position:?}");
+                }
             }
         }
     }

@@ -82,7 +82,7 @@ mod title_bar_panel_control_tests {
 
     impl Render for TopTabGeometryProbe {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            let row_height = px(super::tab_scroll::tab_row_height(self.0));
+            let row_height = px(super::top_tabs::top_tab_height(self.0));
             h_flex()
                 .w(px(400.0))
                 .h(px(48.0))

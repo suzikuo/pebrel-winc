@@ -302,8 +302,12 @@ impl SettingsPane {
         v_flex()
             .w_full()
             .gap(px(GROUP_GAP))
-            .child(selectors)
-            .child(self.sidebar_spacing_settings(cx))
+            .children(
+                self.show_appearance_section(AppearanceSection::Theme, cx).then_some(selectors),
+            )
+            .when(self.show_appearance_section(AppearanceSection::SidebarSpacing, cx), |body| {
+                body.child(self.sidebar_spacing_settings(cx))
+            })
             .child(settings)
     }
 }
