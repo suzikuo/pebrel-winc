@@ -62,6 +62,14 @@ pebrel plugin uninstall example.theme-generator
   Its operations run on the background executor; results carry a sequence number so a newer
   operation discards an older one, and a closed page drops late results.
 
+## Plugin Community
+
+Pebrel Winc loads the [community catalog](https://github.com/suzikuo/pebrel-winc-plugins)
+from **Settings → Plugins → Plugin Community**. Choose a plugin to review its requested
+permissions and view the source at the pinned commit. Confirm to install it. The catalog
+currently supports standalone manifests, including Scratch Terminal and Winc. Winc asks for
+a local `winc.exe`. Local folder installation still supports scripts and bundled themes.
+
 ## Directory launchers
 
 A package can declare `[[directory_launchers]]` in `plugin.toml`. A launcher declares an
@@ -77,7 +85,9 @@ tooltip when the current pane is supported. Clicking a button captures the focus
 directory. For a Windows pane, Pebrel uses its directory as the working directory and passes
 `windows_args` as literal arguments. For a WSL pane, it uses `wsl_args` with `{distribution}` and `{directory}`
 substituted once each as whole arguments. An omitted `wsl_args` limits the launcher to
-Windows panes. Buttons are disabled for SSH panes and when no supported directory is known.
+Windows panes. A launcher can instead set `executable = "windows-explorer"` and omit both
+argument lists. It opens the focused Windows folder or an accessible WSL folder in Explorer.
+Buttons are disabled for SSH panes and when no supported directory is known.
 
 Installation requires the `directory_launcher` grant (`--grant directory-launcher` in the
 CLI). The Settings confirmation shows the executable and arguments. Pebrel binds the grant

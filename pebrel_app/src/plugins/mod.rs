@@ -2,14 +2,16 @@
 
 mod boundary;
 pub(crate) mod cli;
+#[cfg(feature = "gpui-shell")]
+pub(crate) mod community;
 pub(crate) mod directory;
 pub(crate) mod install;
-pub(crate) mod workspace;
 mod json;
 mod lua;
 mod package;
 #[cfg(feature = "gpui-shell")]
 pub(crate) mod themes;
+pub(crate) mod workspace;
 #[cfg(not(feature = "gpui-shell"))]
 mod themes {
     //! 没有主题库的构建不接受需要主题授权的插件。

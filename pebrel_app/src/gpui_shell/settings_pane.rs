@@ -68,6 +68,7 @@ mod mobile;
 mod navigation;
 mod notifications;
 mod plugins;
+mod plugins_community;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod plugins_tests;
 mod plugins_view;

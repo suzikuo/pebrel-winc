@@ -20,12 +20,12 @@ impl SettingsPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        if self.plugins.listing.is_none() && !self.plugins.loading && self.plugins.busy.is_none() {
+        if self.plugins.listing.is_none() && self.plugins.idle() {
             self.refresh_plugins(cx);
         }
         let language = crate::gpui_shell::config::ui_language(cx);
         let muted = cx.theme().muted_foreground;
-        let idle = !self.plugins.loading && self.plugins.busy.is_none();
+        let idle = self.plugins.idle();
         let header = h_flex()
             .justify_between()
             .gap_3()
@@ -39,6 +39,17 @@ impl SettingsPane {
                 h_flex()
                     .gap_2()
                     .child(
+                        Button::new("plugins-community")
+                            .debug_selector(|| "plugins-community".into())
+                            .small()
+                            .outline()
+                            .label(language.text(Message::SettingsPluginsCommunityTitle))
+                            .disabled(!idle)
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.toggle_plugin_community(cx)),
+                            ),
+                    )
+                    .child(
                         Button::new("plugins-install")
                             .debug_selector(|| "plugins-install".to_owned())
                             .small()
@@ -51,7 +62,7 @@ impl SettingsPane {
                                 self.plugins.busy,
                                 Some(Busy::Picking | Busy::Installing)
                             ))
-                            .disabled(!idle || self.plugins.pending.is_some())
+                            .disabled(!idle)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.pick_plugin_folder(window, cx)
                             })),
@@ -78,6 +89,9 @@ impl SettingsPane {
         }
         if let Some((None, result)) = &self.plugins.feedback {
             page = page.child(feedback_line(None, result, cx));
+        }
+        if self.plugins.community_open {
+            page = page.child(self.plugin_community_section(cx));
         }
         let border = crate::gpui_shell::theme::settings_hairline(cx);
         match &self.plugins.listing {
@@ -159,6 +173,13 @@ impl SettingsPane {
                 .child(div().text_sm().child(format!("• {}", language.text(grant_label(*grant)))));
         }
         for launcher in &pending.request.directory_launchers {
+            if launcher.opens_explorer() {
+                grants = grants.child(div().text_sm().whitespace_normal().child(language.format(
+                    Message::SettingsPluginsLauncherExplorer,
+                    &[("title", &launcher.title)],
+                )));
+                continue;
+            }
             grants = grants.child(div().text_sm().whitespace_normal().child(language.format(
                 Message::SettingsPluginsLauncherWindows,
                 &[
@@ -190,7 +211,21 @@ impl SettingsPane {
                 )),
             )
             .child(grants)
-            .child(div().text_xs().text_color(muted).child(pending.path.display().to_string()))
+            .when_some(pending.community.as_ref(), |card, (url, _)| {
+                let url = url.clone();
+                card.child(
+                    Button::new("plugins-community-source")
+                        .small()
+                        .ghost()
+                        .label(language.text(Message::SettingsPluginsCommunitySource))
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                )
+            })
+            .when(pending.community.is_none(), |card| {
+                card.child(
+                    div().text_xs().text_color(muted).child(pending.path.display().to_string()),
+                )
+            })
             .child(
                 h_flex()
                     .gap_2()
@@ -224,7 +259,7 @@ impl SettingsPane {
     ) -> gpui::Stateful<gpui::Div> {
         let language = crate::gpui_shell::config::ui_language(cx);
         let muted = cx.theme().muted_foreground;
-        let idle = !self.plugins.loading && self.plugins.busy.is_none();
+        let idle = self.plugins.idle();
         let busy = self.plugins.busy == Some(Busy::Plugin(plugin.id.clone()));
         let id = plugin.id.clone();
         let mut text = v_flex()
@@ -341,7 +376,7 @@ impl SettingsPane {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let language = crate::gpui_shell::config::ui_language(cx);
-        let idle = !self.plugins.loading && self.plugins.busy.is_none();
+        let idle = self.plugins.idle();
         let id = broken.id.clone();
         row_frame(index, divider, cx)
             .child(

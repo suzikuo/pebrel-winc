@@ -12,4 +12,5 @@
 
 - 目录启动器的安装授权绑定清单里的可执行文件和参数。顶栏按钮在开窗、窗口激活和设置页修改插件后异步刷新。宿主在后台执行点击时选定的本地目录操作，派发前复核插件授权和启用状态。设计依据见 [目录启动授权](../../../architecture/notes/pebrel_app/plugins/2026-11-19-user-approved-directory-launchers.md)。
 - 工作区授权绑定清单和标签菜单的 Luau 源码。动作只针对被点击的标签，结果通过活体标签 ID 重校验。见[工作区贡献边界](../../../architecture/notes/pebrel_app/plugins/2026-11-20-workspace-contributions.md)。
+- 社区目录只应在用户浏览或刷新时联网，按提交 SHA 下载独立清单并复用安装审阅。见 [社区目录](../../../architecture/notes/pebrel_app/plugins/2026-11-24-community-catalog.md)。
 - Luau 引擎、配置模块与不可捕获限额的依据见 [Luau VM 边界](../../../architecture/notes/pebrel_app/luau/2026-11-02-bounded-luau-vms.md)。

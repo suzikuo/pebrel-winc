@@ -7,11 +7,14 @@ use crate::plugins::install::{Library, Listing, Request};
 use crate::plugins::{Grant, themes};
 use crate::theme_library::ThemeLibraryStore;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Busy {
     Picking,
     Installing,
+    CommunityCatalog,
+    CommunityPackage,
     Plugin(String),
 }
 
@@ -20,6 +23,7 @@ pub(super) enum Busy {
 pub(super) struct Pending {
     pub path: PathBuf,
     pub request: Request,
+    pub community: Option<(String, Arc<tempfile::TempDir>)>,
 }
 
 pub(super) struct PluginsState {
@@ -27,6 +31,8 @@ pub(super) struct PluginsState {
     pub loading: bool,
     pub busy: Option<Busy>,
     pub pending: Option<Pending>,
+    pub community_open: bool,
+    pub community: Option<Result<Vec<crate::plugins::community::Entry>, String>>,
     /// Result of the last operation; `Some(id)` attaches it to that row.
     pub feedback: Option<(Option<String>, Result<String, String>)>,
     sequence: u64,
@@ -42,6 +48,8 @@ impl PluginsState {
             loading: false,
             busy: None,
             pending: None,
+            community_open: false,
+            community: None,
             feedback: None,
             sequence: 0,
             library_root: settings.join("plugins"),
@@ -62,8 +70,8 @@ impl PluginsState {
         ThemeLibraryStore::new(self.theme_root.clone())
     }
 
-    fn idle(&self) -> bool {
-        !self.loading && self.busy.is_none()
+    pub(super) fn idle(&self) -> bool {
+        !self.loading && self.busy.is_none() && self.pending.is_none()
     }
 }
 
@@ -102,7 +110,7 @@ impl SettingsPane {
                         executor
                             .spawn(async move {
                                 Library::inspect(&path)
-                                    .map(|request| Pending { path, request })
+                                    .map(|request| Pending { path, request, community: None })
                                     .map_err(|error| error.to_string())
                             })
                             .await,
@@ -157,9 +165,11 @@ impl SettingsPane {
         self.plugins.busy = Some(Busy::Installing);
         let language = crate::gpui_shell::config::ui_language(cx);
         let (library, store) = (self.plugins.library(), self.plugins.store());
+        let Pending { path, request, community } = pending;
         self.run_plugin_task(None, cx, move || {
+            let _staged_package = community;
             let result = (|| {
-                let plugin = library.install_reviewed(&pending.path, &pending.request)?;
+                let plugin = library.install_reviewed(&path, &request)?;
                 let themes = if plugin.grants.contains(&Grant::ThemeLibrary) {
                     themes::install_bundled(&library, &plugin.id, &store)?
                 } else {

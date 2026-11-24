@@ -49,6 +49,7 @@ impl Fixture {
         Pending {
             path: self.package.path().to_owned(),
             request: Library::inspect(self.package.path()).unwrap(),
+            community: None,
         }
     }
 }
