@@ -18,6 +18,26 @@ Every release entry is provided in English and Simplified Chinese.
 
 - 终端目录导入支持 Niu（niubash 的 `niu.exe`）。导入后的 Niu 配置会出现在默认 Shell 下拉中，以 `--login -i` 启动。
 
+## 2.5.5 - 2026-11-24 (Pebrel Winc)
+
+### English
+
+#### Improved
+
+- Improved **Settings → Plugins** with compact typography, separate Installed and Community views, and cards that stack in narrow windows.
+- Improved plugin details. Community cards show the plugin ID, version, source, and any Windows or local executable requirements. Installed cards show status, granted permissions, and the features each plugin adds.
+
+### 简体中文
+
+#### 改进
+
+- **设置 → 插件**采用更紧凑的字号和布局，设有独立的「已安装」与「插件社区」视图。窄窗口下，卡片自动改为单列。
+- 社区卡片展示插件 ID、版本、源码入口，以及适用时的 Windows 或本机可执行文件要求。已安装卡片展示启用状态、已授权权限和插件提供的功能。
+
+### Contributors
+
+- [suzikuo](https://github.com/suzikuo)
+
 ## 2.5.4 - 2026-11-24 (Pebrel Winc)
 
 ### English
