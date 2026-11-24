@@ -1620,7 +1620,7 @@ impl SettingsPane {
             8 => self.section_advanced(cx),
             10 => self.section_agents(window, cx),
             MOBILE_SECTION => self.section_mobile(window, cx),
-            PLUGINS_SECTION => self.section_plugins(window, cx),
+            PLUGINS_SECTION => self.section_plugins(cx),
             _ => self.section_backup(window, cx),
         }
         .into_any_element()
@@ -1775,6 +1775,7 @@ impl Render for SettingsPane {
         let provider_drawer = self.provider_drawer(window, cx);
         let application_page = self.active_section == 0;
         let mobile_page = self.active_section == MOBILE_SECTION;
+        let plugins_page = self.active_section == PLUGINS_SECTION;
         let form_page = matches!(self.active_section, 1 | 2 | 5 | 6 | 8);
         let has_cards = form_page || mobile_page || self.active_section == 9;
         let peeking = self.wallpaper_peeking();
@@ -1839,6 +1840,9 @@ impl Render for SettingsPane {
                     .h_full()
                     .debug_selector(|| "settings-content".to_owned())
                     .when(has_cards, |pane| pane.bg(crate::gpui_shell::theme::settings_canvas_tint(cx)))
+                    .when(plugins_page && !cx.theme().is_dark(), |pane| {
+                        pane.bg(crate::gpui_shell::theme::settings_panel_bg(cx))
+                    })
                     .opacity(if peeking { 0.16 } else { 1.0 })
                     .child(
                         v_flex()
@@ -1850,6 +1854,7 @@ impl Render for SettingsPane {
                             .when(!form_page && !application_page, |content| {
                                 content.pt(px(28.0)).pb(px(30.0))
                             })
+                            .when(plugins_page, |content| content.pt_4())
                             .when(mobile_page || self.active_section == 3, |content| content.p_0())
                             .overflow_y_scrollbar()
                             // Scrollable wraps the content in a block; the full-width flex

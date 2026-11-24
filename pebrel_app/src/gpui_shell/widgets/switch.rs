@@ -20,6 +20,7 @@ struct SwitchMotion {
 #[derive(IntoElement)]
 pub struct NebulaSwitch {
     key: SharedString,
+    aria_label: Option<SharedString>,
     checked: bool,
     disabled: bool,
     small: bool,
@@ -28,7 +29,19 @@ pub struct NebulaSwitch {
 
 impl NebulaSwitch {
     pub fn new(key: impl Into<SharedString>) -> Self {
-        Self { key: key.into(), checked: false, disabled: false, small: false, on_click: None }
+        Self {
+            key: key.into(),
+            aria_label: None,
+            checked: false,
+            disabled: false,
+            small: false,
+            on_click: None,
+        }
+    }
+
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.aria_label = Some(label.into());
+        self
     }
 
     pub fn small(mut self) -> Self {
@@ -131,6 +144,7 @@ impl RenderOnce for NebulaSwitch {
         let button = Button::new(ElementId::Name(selector.clone().into()))
             .debug_selector(move || selector.clone())
             .role(gpui::Role::Switch)
+            .when_some(self.aria_label, |button, label| button.aria_label(label))
             .toggled(checked)
             .disabled(self.disabled)
             .custom(ButtonCustomVariant::new(cx))

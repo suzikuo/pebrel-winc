@@ -112,6 +112,50 @@ fn plugins_page_is_reachable_and_starts_empty_without_touching_the_real_library(
 }
 
 #[gpui::test]
+fn community_cards_reflow_and_switch_back_to_installed_plugins(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (pane, window) = open(cx, &fixture);
+    pane.update(window, |pane, cx| {
+        let entries = ["example.first", "example.second"].map(|id| {
+            serde_json::from_value(serde_json::json!({
+                "id": id,
+                "version": "1.0.0",
+                "name": "Community plugin",
+                "name_zh": "社区插件",
+                "description": "A plugin card with a description that can wrap at narrow widths.",
+                "description_zh": "窄窗口中的插件说明可以换行。",
+                "revision": "0000000000000000000000000000000000000000",
+            }))
+            .unwrap()
+        });
+        pane.plugins.community = Some(Ok(entries.into()));
+        cx.notify();
+    });
+    click("plugins-community", window);
+    redraw(window);
+    assert!(window.debug_bounds("plugins-empty").is_none());
+    let first = window.debug_bounds("plugins-community-card-example.first").unwrap();
+    let second = window.debug_bounds("plugins-community-card-example.second").unwrap();
+    assert!(first.right() < second.left());
+    assert_eq!(first.top(), second.top());
+
+    window.simulate_resize(size(px(690.0), px(900.0)));
+    redraw(window);
+    let first = window.debug_bounds("plugins-community-card-example.first").unwrap();
+    let second = window.debug_bounds("plugins-community-card-example.second").unwrap();
+    let action = window.debug_bounds("plugins-community-review-example.second").unwrap();
+    assert_eq!(first.left(), second.left());
+    assert!(first.bottom() < second.top());
+    assert!(action.right() <= second.right());
+    assert!(action.size.height >= px(32.0));
+
+    click("plugins-installed", window);
+    redraw(window);
+    assert!(window.debug_bounds("plugins-empty").is_some());
+    assert!(window.debug_bounds("plugins-community-card-example.first").is_none());
+}
+
+#[gpui::test]
 fn cancelling_the_grant_installs_nothing(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (pane, window) = open(cx, &fixture);

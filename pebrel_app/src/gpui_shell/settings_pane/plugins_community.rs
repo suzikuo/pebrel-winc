@@ -4,19 +4,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::plugins::{Busy, Pending};
+use super::plugins_view::{plugin_button, plugin_icon, plugin_notice, plugin_status, puzzle_icon};
 use super::*;
 use crate::i18n::{Message, UiLanguage};
 use crate::plugins::community::{self, Entry};
 
 impl SettingsPane {
-    pub(super) fn toggle_plugin_community(&mut self, cx: &mut Context<Self>) {
-        if self.plugins.community_open {
-            self.plugins.community_open = false;
-        } else {
-            self.plugins.community_open = true;
-            if self.plugins.community.is_none() {
-                self.refresh_plugin_community(cx);
-            }
+    pub(super) fn show_plugin_community(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.plugins.community_open = open;
+        if open && self.plugins.community.is_none() {
+            self.refresh_plugin_community(cx);
         }
         cx.notify();
     }
@@ -96,136 +93,196 @@ impl SettingsPane {
         cx.notify();
     }
 
-    pub(super) fn plugin_community_section(&self, cx: &mut Context<Self>) -> gpui::Div {
+    pub(super) fn plugin_community_actions(&self, cx: &Context<Self>) -> gpui::Div {
         let language = crate::gpui_shell::config::ui_language(cx);
-        let idle = self.plugins.idle();
-        let muted = cx.theme().muted_foreground;
-        let mut panel = v_flex()
-            .w_full()
-            .gap_3()
-            .p_4()
-            .rounded_lg()
-            .border_1()
-            .border_color(crate::gpui_shell::theme::settings_hairline(cx))
+        h_flex()
+            .flex_wrap()
+            .gap_1()
             .child(
-                h_flex()
-                    .gap_2()
-                    .justify_end()
-                    .child(
-                        Button::new("plugins-community-repository")
-                            .small()
-                            .ghost()
-                            .label(language.text(Message::SettingsPluginsCommunityRepository))
-                            .on_click(|_, _, cx| cx.open_url(community::REPOSITORY)),
-                    )
-                    .child(
-                        Button::new("plugins-community-refresh")
-                            .small()
-                            .ghost()
-                            .label(language.text(Message::SettingsPluginsRefresh))
-                            .loading(self.plugins.busy == Some(Busy::CommunityCatalog))
-                            .disabled(!idle)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.refresh_plugin_community(cx)),
-                            ),
-                    ),
-            );
-        if self.plugins.busy == Some(Busy::CommunityPackage) {
-            panel = panel.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(language.text(Message::SettingsPluginsCommunityPreparing)),
-            );
-        }
-        match &self.plugins.community {
-            None => panel.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(language.text(Message::SettingsPluginsCommunityLoading)),
-            ),
-            Some(Err(error)) => {
-                panel.child(
-                    div().text_sm().text_color(cx.theme().danger).whitespace_normal().child(
-                        language.format(Message::SettingsPluginsFailed, &[("error", error)]),
-                    ),
-                )
+                plugin_button("plugins-community-repository")
+                    .ghost()
+                    .icon(IconName::Github)
+                    .label(language.text(Message::SettingsPluginsCommunityRepository))
+                    .on_click(|_, _, cx| cx.open_url(community::REPOSITORY)),
+            )
+            .child(
+                plugin_button("plugins-community-refresh")
+                    .ghost()
+                    .icon(IconName::Redo2)
+                    .label(language.text(Message::SettingsPluginsRefresh))
+                    .loading(self.plugins.busy == Some(Busy::CommunityCatalog))
+                    .disabled(!self.plugins.idle())
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh_plugin_community(cx))),
+            )
+    }
+
+    pub(super) fn plugin_community_section(&self, cx: &Context<Self>) -> gpui::Div {
+        let language = crate::gpui_shell::config::ui_language(cx);
+        let theme = cx.theme();
+        let panel = v_flex().w_full().gap_2().when(
+            self.plugins.busy == Some(Busy::CommunityPackage),
+            |panel| {
+                panel.child(plugin_notice(
+                    IconName::Loader,
+                    theme.muted_foreground,
+                    language.text(Message::SettingsPluginsCommunityPreparing),
+                    cx,
+                ))
             },
-            Some(Ok(entries)) if entries.is_empty() => panel.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(language.text(Message::SettingsPluginsCommunityEmpty)),
-            ),
+        );
+        match &self.plugins.community {
+            None => panel.child(plugin_notice(
+                IconName::Loader,
+                theme.muted_foreground,
+                language.text(Message::SettingsPluginsCommunityLoading),
+                cx,
+            )),
+            Some(Err(error)) => panel.child(plugin_notice(
+                IconName::TriangleAlert,
+                theme.danger,
+                language.format(Message::SettingsPluginsFailed, &[("error", error)]),
+                cx,
+            )),
+            Some(Ok(entries)) if entries.is_empty() => panel.child(plugin_notice(
+                IconName::Inbox,
+                theme.muted_foreground,
+                language.text(Message::SettingsPluginsCommunityEmpty),
+                cx,
+            )),
             Some(Ok(entries)) => {
-                for entry in entries {
-                    let installed = self
-                        .plugins
-                        .listing
-                        .as_ref()
-                        .and_then(|listing| listing.as_ref().ok())
-                        .is_some_and(|listing| {
+                let listing =
+                    self.plugins.listing.as_ref().and_then(|listing| listing.as_ref().ok());
+                panel.child(h_flex().w_full().flex_wrap().items_stretch().gap_2().children(
+                    entries.iter().map(|entry| {
+                        let installed = listing.is_some_and(|listing| {
                             listing.plugins.iter().any(|plugin| {
                                 plugin.id == entry.id && plugin.version == entry.version
                             })
                         });
-                    let supported = entry.supported();
-                    let action = if installed {
-                        Message::SettingsPluginsCommunityInstalled
-                    } else if !supported {
-                        Message::SettingsPluginsCommunityWindowsOnly
-                    } else {
-                        Message::SettingsPluginsCommunityReview
-                    };
-                    let (name, description) =
-                        if matches!(language, UiLanguage::ZhCn | UiLanguage::ZhTw) {
-                            (&entry.name_zh, &entry.description_zh)
-                        } else {
-                            (&entry.name, &entry.description)
-                        };
-                    let plugin = entry.clone();
-                    let selector = format!("plugins-community-review-{}", entry.id);
-                    panel = panel.child(
-                        h_flex()
-                            .gap_3()
-                            .w_full()
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(format!("{} · {}", name, entry.version)),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .whitespace_normal()
-                                            .child(description.clone()),
-                                    ),
-                            )
-                            .child(
-                                Button::new(SharedString::from(selector.clone()))
-                                    .debug_selector(move || selector.clone())
-                                    .small()
-                                    .outline()
-                                    .flex_shrink_0()
-                                    .label(language.text(action))
-                                    .disabled(!idle || installed || !supported)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.review_community_plugin(plugin.clone(), window, cx);
-                                    })),
-                            ),
-                    );
-                }
-                panel
+                        self.community_plugin_card(entry, installed, language, cx)
+                    }),
+                ))
             },
         }
+    }
+
+    fn community_plugin_card(
+        &self,
+        entry: &Entry,
+        installed: bool,
+        language: UiLanguage,
+        cx: &Context<Self>,
+    ) -> gpui::Div {
+        let theme = cx.theme();
+        let (name, description) = if matches!(language, UiLanguage::ZhCn | UiLanguage::ZhTw) {
+            (&entry.name_zh, &entry.description_zh)
+        } else {
+            (&entry.name, &entry.description)
+        };
+        let plugin = entry.clone();
+        let selector = format!("plugins-community-review-{}", entry.id);
+        let action = if installed {
+            Some(
+                plugin_status(
+                    language.text(Message::SettingsPluginsCommunityInstalled),
+                    theme.success,
+                )
+                .into_any_element(),
+            )
+        } else if entry.supported() {
+            Some(
+                plugin_button(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .primary()
+                    .outline()
+                    .icon(IconName::ArrowRight)
+                    .label(language.text(Message::SettingsPluginsCommunityReview))
+                    .disabled(!self.plugins.idle())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.review_community_plugin(plugin.clone(), window, cx);
+                    }))
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let url = entry.source_url();
+        let source = language.text(Message::SettingsPluginsCommunitySource);
+        let card_selector = format!("plugins-community-card-{}", entry.id);
+        design::settings_card(cx)
+            .debug_selector(move || card_selector.clone())
+            .flex_1()
+            .w_auto()
+            .flex_basis(px(315.0))
+            .p_3()
+            .gap_2()
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(plugin_icon(puzzle_icon(), theme.link))
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .flex_1()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .whitespace_normal()
+                                    .child(name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .whitespace_normal()
+                                    .child(format!("{} · {}", entry.version, entry.id)),
+                            ),
+                    )
+                    .child(
+                        plugin_button(SharedString::from(format!("plugins-source-{}", entry.id)))
+                            .ghost()
+                            .w(px(32.0))
+                            .icon(IconName::ExternalLink)
+                            .aria_label(source)
+                            .tooltip(source)
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .whitespace_normal()
+                    .text_color(theme.muted_foreground)
+                    .child(description.clone()),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .when(entry.windows_only, |metadata| {
+                                metadata.child(plugin_status(
+                                    language.text(Message::SettingsPluginsCommunityWindowsOnly),
+                                    theme.muted_foreground,
+                                ))
+                            })
+                            .when(entry.choose_executable, |metadata| {
+                                metadata.child(plugin_status(
+                                    language.text(Message::SettingsPluginsCommunityLocalExecutable),
+                                    theme.muted_foreground,
+                                ))
+                            }),
+                    )
+                    .children(action),
+            )
     }
 }
 
