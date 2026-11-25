@@ -1780,47 +1780,6 @@ impl NebulaWorkspace {
         })
     }
 
-    /// 从弹窗选中的 shell 起一个新终端。走共享 v4 launch 身份，因此冷恢复
-    /// 拿得回真正的启动命令，侧栏短标也跟着对。
-    fn launch_palette_shell(
-        &mut self,
-        detected: crate::shell_detect::DetectedShell,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.dismiss_palette_state();
-        let shell = detected.shell();
-        let launch = crate::session::LaunchSession::Shell {
-            name: detected.name.clone(),
-            program: shell.program().to_owned(),
-            args: shell.args().to_vec(),
-        };
-        let cwd = Self::startup_directory().or_else(|| {
-            self.tabs
-                .get(self.active)
-                .and_then(WorkspaceTab::focused_view)
-                .and_then(|view| view.read(cx).local_cwd())
-        });
-        self.add_terminal_with(launch, cwd, None, window, cx);
-    }
-
-    fn launch_palette_profile(
-        &mut self,
-        profile: crate::config::ui_config::Profile,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.dismiss_palette_state();
-        let launch = shell_launch::profile_launch_session(profile);
-        let cwd = Self::startup_directory().or_else(|| {
-            self.tabs
-                .get(self.active)
-                .and_then(WorkspaceTab::focused_view)
-                .and_then(|view| view.read(cx).local_cwd())
-        });
-        self.add_terminal_with(launch, cwd, None, window, cx);
-    }
-
     fn run_palette_action(
         &mut self,
         action: crate::display::command_palette::PaletteAction,

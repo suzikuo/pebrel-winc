@@ -7,6 +7,10 @@ use gpui_component::menu::PopupMenuItem;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io, path::PathBuf};
 
+mod startup_directory;
+
+pub(super) use startup_directory::GroupStartupDirectory;
+
 pub(super) const GROUP_GUIDE_X: f32 = 13.0;
 const GROUP_CORNER_RADIUS: f32 = 12.0;
 const GROUP_TRAILING_INSET: f32 = 10.0;
@@ -60,6 +64,8 @@ struct Group {
     name: String,
     #[serde(default, skip_serializing_if = "GroupColor::is_auto")]
     color: GroupColor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    startup_directory: Option<GroupStartupDirectory>,
 }
 
 #[derive(Clone, Default)]
@@ -114,9 +120,11 @@ impl TabGroups {
     }
 
     pub(super) fn plugin_group_snapshot(&self) -> Vec<serde_json::Value> {
-        self.profile.groups.iter().map(|group| {
-            serde_json::json!({"id": group.id.to_string(), "name": group.name})
-        }).collect()
+        self.profile
+            .groups
+            .iter()
+            .map(|group| serde_json::json!({"id": group.id.to_string(), "name": group.name}))
+            .collect()
     }
 
     pub(super) fn group_id(&self, index: usize) -> u64 {
@@ -125,6 +133,10 @@ impl TabGroups {
 
     pub(super) fn resolve(&self, id: Option<u64>) -> Option<u64> {
         id.filter(|id| self.profile.groups.iter().any(|group| group.id == *id))
+    }
+
+    pub(super) fn startup_directory(&self, id: u64) -> Option<&GroupStartupDirectory> {
+        self.profile.groups.iter().find(|group| group.id == id)?.startup_directory.as_ref()
     }
 }
 
@@ -175,10 +187,11 @@ fn project_rows(
     rows
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum GroupEdit {
     Create,
     Rename(u64),
+    StartupDirectory(u64, Option<GroupStartupDirectory>),
     Color(u64, GroupColor),
     Move(u64, isize),
     Delete(u64),
@@ -312,7 +325,10 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) -> crate::plugins::Result<()> {
         if self.tab_groups.resolve(group) != group {
-            return Err(crate::plugins::Error::new("target_not_found", "the tab group was removed"));
+            return Err(crate::plugins::Error::new(
+                "target_not_found",
+                "the tab group was removed",
+            ));
         }
         self.set_tab_group(ix, group, cx);
         Ok(())
@@ -524,8 +540,18 @@ impl NebulaWorkspace {
         let previous_focus = window.focused(cx);
         let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
             let color_workspace = workspace.clone();
+            let directory_workspace = workspace.clone();
             let menu = menu
                 .when_some(previous_focus, |menu, focus| menu.action_context(focus))
+                .item(
+                    PopupMenuItem::new(language.text(Message::TabGroupsStartupDirectory)).on_click(
+                        move |_, window, cx| {
+                            let _ = directory_workspace.update(cx, |this, cx| {
+                                this.edit_tab_group_startup_directory(id, window, cx);
+                            });
+                        },
+                    ),
+                )
                 .submenu(language.text(Message::TabGroupsColor), window, cx, move |menu, _, _| {
                     group_color_items(menu, ix, id, current_color, dark, language, &color_workspace)
                 });
@@ -540,9 +566,11 @@ impl NebulaWorkspace {
                 let workspace = workspace.clone();
                 menu.item(PopupMenuItem::new(language.text(label)).disabled(disabled).on_click(
                     move |_, window, cx| {
-                        let _ = workspace.update(cx, |this, cx| match edit {
-                            GroupEdit::Rename(_) => this.edit_tab_group_name(edit, window, cx),
-                            _ => {
+                        let _ = workspace.update(cx, |this, cx| match edit.clone() {
+                            edit @ GroupEdit::Rename(_) => {
+                                this.edit_tab_group_name(edit, window, cx)
+                            },
+                            edit => {
                                 this.apply_tab_group_edit(edit, "", window, cx);
                             },
                         });
@@ -589,6 +617,7 @@ impl NebulaWorkspace {
         window.open_dialog(cx, move |dialog, window, _| {
             let input = dialog_input.clone();
             let workspace = workspace.clone();
+            let edit = edit.clone();
             center_modal_dialog(dialog, window, 220.0)
                 .title(title)
                 .child(Input::new(&dialog_input).w_full().accessibility_id("tab-group-name"))
@@ -612,7 +641,9 @@ impl NebulaWorkspace {
                 .on_ok(move |_, window, cx| {
                     let name = input.read(cx).value().to_string();
                     workspace
-                        .update(cx, |this, cx| this.apply_tab_group_edit(edit, &name, window, cx))
+                        .update(cx, |this, cx| {
+                            this.apply_tab_group_edit(edit.clone(), &name, window, cx)
+                        })
                         .unwrap_or(true)
                 })
         });
@@ -691,7 +722,7 @@ fn group_color_items(
 }
 
 fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Result<()> {
-    let id = match edit {
+    let id = match &edit {
         GroupEdit::Create => {
             let mut bytes = [0; 8];
             getrandom::fill(&mut bytes).map_err(|err| io::Error::other(err.to_string()))?;
@@ -699,17 +730,30 @@ fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Re
             if groups.iter().any(|group| group.id == id) {
                 return Err(io::Error::other("duplicate group id"));
             }
-            groups.push(Group { id, name: name.to_owned(), color: GroupColor::Auto });
+            groups.push(Group {
+                id,
+                name: name.to_owned(),
+                color: GroupColor::Auto,
+                startup_directory: None,
+            });
             return Ok(());
         },
         GroupEdit::Rename(id)
+        | GroupEdit::StartupDirectory(id, _)
         | GroupEdit::Color(id, _)
         | GroupEdit::Move(id, _)
-        | GroupEdit::Delete(id) => id,
+        | GroupEdit::Delete(id) => *id,
     };
-    let Some(ix) = groups.iter().position(|group| group.id == id) else { return Ok(()) };
+    let Some(ix) = groups.iter().position(|group| group.id == id) else {
+        return if matches!(edit, GroupEdit::StartupDirectory(_, _)) {
+            Err(io::Error::new(io::ErrorKind::NotFound, "group removed"))
+        } else {
+            Ok(())
+        };
+    };
     match edit {
         GroupEdit::Rename(_) => groups[ix].name = name.to_owned(),
+        GroupEdit::StartupDirectory(_, directory) => groups[ix].startup_directory = directory,
         GroupEdit::Color(_, color) => groups[ix].color = color,
         GroupEdit::Move(_, delta) => {
             if let Some(to) = ix.checked_add_signed(delta).filter(|&to| to < groups.len()) {
@@ -748,10 +792,39 @@ mod tests {
     }
 
     #[test]
+    fn group_startup_directory_round_trips_and_can_be_cleared() {
+        let mut groups: Vec<Group> =
+            serde_json::from_str(r#"[{"id":1,"name":"Project"},{"id":2,"name":"Other"}]"#).unwrap();
+        assert!(groups[0].startup_directory.is_none());
+        let directory = GroupStartupDirectory::Wsl {
+            distro: "Ubuntu".into(),
+            path: "/root/project space".into(),
+        };
+        update_groups(&mut groups, GroupEdit::StartupDirectory(1, Some(directory.clone())), "")
+            .unwrap();
+        let saved = serde_json::to_string(&groups).unwrap();
+        let mut groups: Vec<Group> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(groups[0].startup_directory.as_ref(), Some(&directory));
+        assert!(groups[1].startup_directory.is_none());
+        update_groups(&mut groups, GroupEdit::StartupDirectory(1, None), "").unwrap();
+        assert!(!serde_json::to_string(&groups).unwrap().contains("startup_directory"));
+        update_groups(&mut groups, GroupEdit::Delete(1), "").unwrap();
+        assert!(
+            update_groups(&mut groups, GroupEdit::StartupDirectory(1, Some(directory)), "")
+                .is_err()
+        );
+    }
+
+    #[test]
     fn group_drop_only_hits_visible_rows_and_skips_gaps() {
         let rows = [SidebarRow::Group(0), SidebarRow::Group(1), SidebarRow::Ungrouped];
         let density = pebrel_settings::DensityName::Standard;
-        let layout = tab_scroll::SidebarRowLayout::new(&rows, density, Default::default(), Default::default());
+        let layout = tab_scroll::SidebarRowLayout::new(
+            &rows,
+            density,
+            Default::default(),
+            Default::default(),
+        );
         let height = layout.row_height(0);
         let pitch = height + tab_scroll::tab_row_gap(density);
         assert_eq!(layout.row_at(-1.0, 0, 2), None);

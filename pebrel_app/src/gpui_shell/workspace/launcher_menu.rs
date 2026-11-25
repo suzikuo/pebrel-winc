@@ -47,14 +47,7 @@ impl LauncherTarget {
 
     fn local_launch(&self) -> Option<crate::session::LaunchSession> {
         match self {
-            Self::Shell(detected) => {
-                let shell = detected.shell();
-                Some(crate::session::LaunchSession::Shell {
-                    name: detected.name.clone(),
-                    program: shell.program().to_owned(),
-                    args: shell.args().to_vec(),
-                })
-            },
+            Self::Shell(detected) => Some(super::shell_launch::detected_launch(detected)),
             Self::Profile(profile) => {
                 Some(super::shell_launch::profile_launch_session(profile.clone()))
             },
@@ -295,12 +288,7 @@ impl NebulaWorkspace {
         let Some(launch) = target.local_launch() else {
             return;
         };
-        let cwd = Self::startup_directory().or_else(|| {
-            self.tabs
-                .get(self.active)
-                .and_then(WorkspaceTab::focused_view)
-                .and_then(|view| view.read(cx).local_cwd())
-        });
+        let (launch, cwd) = self.prepare_shell_picker_launch(launch, cx);
         match elevation::is_elevated() {
             Ok(true) => {
                 let group = self.shell_picker_group;

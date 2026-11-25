@@ -7,6 +7,11 @@ use super::{
     WorkspacePaletteRow, ssh_host_icon_ids, workspace_ui_language,
 };
 use crate::display::command_palette::LauncherFilter;
+use crate::i18n::{Message, UiLanguage};
+use crate::session::LaunchSession;
+use std::path::PathBuf;
+
+use super::tab_groups::GroupStartupDirectory;
 
 impl NebulaWorkspace {
     /// The new-tab menu and Ctrl+K share the shell picker.
@@ -28,7 +33,7 @@ impl NebulaWorkspace {
                 .and_then(|settings| settings.shell_id.as_deref()),
         );
         let language = workspace_ui_language();
-        let rows = shell_palette_rows(
+        let mut rows = shell_palette_rows(
             crate::shell_detect::refresh_detection(), // 打开即重扫：新装的 shell 不用重启
             crate::terminal_profiles::TerminalProfiles::load()
                 .map(|store| store.as_config_profiles())
@@ -38,6 +43,15 @@ impl NebulaWorkspace {
             language,
             window.scale_factor().max(0.5),
         );
+        if let Some(directory) = self.shell_picker_startup_directory()
+            && let Some(index) =
+                rows.iter().position(|row| directory_matches(directory, &row.action))
+        {
+            let mut row = rows.remove(index);
+            row.group_order = 0;
+            row.group = language.pick("推荐", "Recommended").to_owned();
+            rows.insert(0, row);
+        }
         self.palette_override = Some(rows);
         self.shell_picker_open = true;
         self.launcher_filter = LauncherFilter::All;
@@ -58,6 +72,67 @@ impl NebulaWorkspace {
             return;
         }
         self.open_shell_palette(window, cx);
+    }
+
+    fn shell_picker_startup_directory(&self) -> Option<&GroupStartupDirectory> {
+        self.tab_groups.startup_directory(self.shell_picker_group?)
+    }
+
+    pub(super) fn shell_picker_directory_hint(
+        &self,
+        action: Option<&WorkspacePaletteAction>,
+        language: UiLanguage,
+    ) -> Option<String> {
+        let directory = self.shell_picker_startup_directory()?;
+        Some(if action.is_none_or(|action| directory_matches(directory, action)) {
+            language.format(Message::TabGroupsStartupPreview, &[("path", directory.path())])
+        } else {
+            language.text(Message::TabGroupsStartupOtherShell).to_owned()
+        })
+    }
+
+    pub(super) fn prepare_shell_picker_launch(
+        &self,
+        launch: LaunchSession,
+        cx: &gpui::App,
+    ) -> (LaunchSession, Option<PathBuf>) {
+        if let Some(cwd) = self
+            .shell_picker_startup_directory()
+            .and_then(|directory| directory.for_launch(&launch))
+        {
+            let snapshot = super::shell_launch::at_explicit_directory(launch, Some(cwd));
+            return (snapshot, Some(cwd.to_owned()));
+        }
+        let cwd = Self::startup_directory().or_else(|| {
+            self.tabs
+                .get(self.active)
+                .and_then(super::WorkspaceTab::focused_view)
+                .and_then(|view| view.read(cx).local_cwd())
+        });
+        (launch, cwd)
+    }
+
+    pub(super) fn launch_palette_local(
+        &mut self,
+        launch: LaunchSession,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (launch, cwd) = self.prepare_shell_picker_launch(launch, cx);
+        self.dismiss_palette_state();
+        self.add_terminal_with(launch, cwd, None, window, cx);
+    }
+}
+
+fn directory_matches(directory: &GroupStartupDirectory, action: &WorkspacePaletteAction) -> bool {
+    match action {
+        WorkspacePaletteAction::LaunchShell(shell) => {
+            directory.matches_program(&shell.program, &shell.args)
+        },
+        WorkspacePaletteAction::LaunchProfile(profile) => {
+            directory.matches_program(&profile.command, &profile.args)
+        },
+        _ => false,
     }
 }
 

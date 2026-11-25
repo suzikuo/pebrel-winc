@@ -5,6 +5,7 @@ use crate::gpui_shell::theme::selected_glass;
 mod tests;
 
 const PALETTE_SEARCH_HEIGHT: f32 = 48.0;
+const GROUP_DIRECTORY_HINT_HEIGHT: f32 = 28.0;
 
 /// 命令面板 / Shell 选择弹窗里图标轨的逻辑边长。品牌贴图、Nerd Font 字形
 /// 与组件库线性图标都排进同一个槽，行与行之间才不会有的缩进有的不缩进。
@@ -106,10 +107,14 @@ impl NebulaWorkspace {
                 self.add_ssh_terminal(host, window, cx);
             },
             WorkspacePaletteAction::LaunchShell(detected) => {
-                self.launch_palette_shell(detected, window, cx);
+                self.launch_palette_local(shell_launch::detected_launch(&detected), window, cx);
             },
             WorkspacePaletteAction::LaunchProfile(profile) => {
-                self.launch_palette_profile(profile, window, cx);
+                self.launch_palette_local(
+                    shell_launch::profile_launch_session(profile),
+                    window,
+                    cx,
+                );
             },
         }
         self.assign_shell_picker_group(launch_group, cx);
@@ -308,6 +313,10 @@ impl NebulaWorkspace {
             self.command_palette_selected = items.len().saturating_sub(1);
         }
         let has_filter_bar = palette_filters.is_some();
+        let directory_hint = self.shell_picker_directory_hint(
+            items.get(self.command_palette_selected).map(|row| &row.action),
+            language,
+        );
         let item_count = items.len();
         let mut group_count = 0;
         let mut measured_group: Option<&str> = None;
@@ -331,7 +340,8 @@ impl NebulaWorkspace {
         let results_height = f32::from(window.viewport_size().height).min(PALETTE_PANEL_HEIGHT)
             - 2.0
             - PALETTE_SEARCH_HEIGHT
-            - if has_filter_bar { PALETTE_FILTER_BAR_HEIGHT } else { 0.0 };
+            - if has_filter_bar { PALETTE_FILTER_BAR_HEIGHT } else { 0.0 }
+            - if directory_hint.is_some() { GROUP_DIRECTORY_HINT_HEIGHT } else { 0.0 };
         let results_scrollable = content_height > results_height;
         // 同一份 picker 只要有一行带图标，就为全部行保留固定 icon rail；常规
         // 命令目录没有图标时整列消失，不会凭空多出一层缩进。
@@ -728,6 +738,24 @@ impl NebulaWorkspace {
                     )
                     .child(search_box)
                     .children(filter_bar)
+                    .when_some(directory_hint, |panel, hint| {
+                        let tooltip = hint.clone();
+                        panel.child(
+                            h_flex()
+                                .id("group-startup-directory-hint")
+                                .h(px(GROUP_DIRECTORY_HINT_HEIGHT))
+                                .flex_shrink_0()
+                                .px_4()
+                                .gap_2()
+                                .items_center()
+                                .text_color(muted)
+                                .child(Icon::new(IconName::Folder).xsmall())
+                                .child(div().min_w_0().truncate().text_xs().child(hint))
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(tooltip.clone()).build(window, cx)
+                                }),
+                        )
+                    })
                     .child(results),
             )
             .into_any_element()

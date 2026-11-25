@@ -216,12 +216,7 @@ fn resolve_from_snapshot(requested: &str) -> Option<crate::session::LaunchSessio
         .into_iter()
         .find(|shell| shell.id.eq_ignore_ascii_case(requested))
     {
-        let shell = detected.shell();
-        return Some(crate::session::LaunchSession::Shell {
-            name: detected.name,
-            program: shell.program().to_owned(),
-            args: shell.args().to_vec(),
-        });
+        return Some(detected_launch(&detected));
     }
     if let Some(launch) = crate::terminal_profiles::TerminalProfiles::load()
         .ok()
@@ -269,6 +264,17 @@ fn wsl_launch_for_id(shell_id: &str) -> Option<crate::session::LaunchSession> {
         program: crate::platform::shell::wsl_executable()?,
         args,
     })
+}
+
+pub(super) fn detected_launch(
+    detected: &crate::shell_detect::DetectedShell,
+) -> crate::session::LaunchSession {
+    let shell = detected.shell();
+    crate::session::LaunchSession::Shell {
+        name: detected.name.clone(),
+        program: shell.program().to_owned(),
+        args: shell.args().to_vec(),
+    }
 }
 
 pub(super) fn profile_launch_session(

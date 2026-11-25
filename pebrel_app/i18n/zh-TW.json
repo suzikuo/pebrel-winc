@@ -1,4 +1,15 @@
 {
+  "tab_groups": {
+    "startup_directory": "設定啟動目錄",
+    "startup_from_tab": "從群組內的分頁取得目錄",
+    "startup_no_tabs": "群組內沒有可用的分頁目錄",
+    "startup_local": "本機",
+    "startup_path": "目錄的絕對路徑",
+    "startup_clear_hint": "留空並儲存即可清除群組啟動目錄。",
+    "startup_invalid_path": "請輸入適用於所選環境的絕對路徑。",
+    "startup_preview": "啟動目錄：{path}",
+    "startup_other_shell": "選取的終端機會使用自己的啟動目錄。"
+  },
   "prompt_suggestions": {
     "title": "提示詞預測",
     "description": "為 Claude Code、Pi 和 OpenCode 的原生空輸入框預測下一句話。新工作階段生效，語言跟隨軟體設定。",
