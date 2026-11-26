@@ -6342,7 +6342,7 @@ dependencies = [
 
 [[package]]
 name = "pebrel"
-version = "2.5.6"
+version = "2.5.7"
 dependencies = [
  "ab_glyph_rasterizer",
  "aes-gcm",
