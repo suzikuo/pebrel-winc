@@ -424,6 +424,29 @@ pub fn settings_panel_bg(cx: &App) -> Hsla {
     solid(resolved_skin(cx).panel)
 }
 
+fn settings_follows_window_opacity(cx: &App) -> bool {
+    cx.try_global::<crate::gpui_shell::config::Settings>()
+        .is_some_and(|settings| settings.settings_follow_opacity)
+}
+
+/// Settings surfaces share the live alpha in opt-in mode. The preference is cached.
+fn settings_surface_opacity(cx: &App) -> f32 {
+    if settings_follows_window_opacity(cx) {
+        crate::gpui_shell::wallpaper::card_surface_opacity(cx)
+    } else {
+        1.0
+    }
+}
+
+pub(super) fn settings_readability_bg(cx: &App) -> Hsla {
+    if settings_follows_window_opacity(cx) {
+        // The workspace already paints the live background under these surfaces.
+        gpui::transparent_black()
+    } else {
+        settings_panel_bg(cx)
+    }
+}
+
 /// Terminal completion colors are derived from the active Nebula skin. The
 /// popup used to switch between two hard-coded black/white palettes, which
 /// made custom themes look as if a foreign window had been pasted on top.
@@ -511,8 +534,13 @@ fn sync_component_focus_ring_for_input(last_input_was_keyboard: bool, cx: &mut A
 }
 
 /// 设置卡片借用当前主题的中性色阶，独立于选中与焦点色。
-pub(super) fn settings_card_fill(cx: &App) -> Hsla {
-    settings_card_fill_for_theme(&resolved_theme(cx))
+pub(super) fn settings_card_fill(cx: &App, tint: Option<Hsla>) -> Hsla {
+    let mut fill = settings_card_fill_for_theme(&resolved_theme(cx));
+    if let Some(tint) = tint {
+        fill = fill.blend(tint);
+    }
+    fill.a *= settings_surface_opacity(cx);
+    fill
 }
 
 fn settings_card_fill_for_theme(theme: &ResolvedTheme) -> Hsla {
@@ -541,10 +569,11 @@ pub(super) fn settings_card_shadow(cx: &App) -> Vec<gpui::BoxShadow> {
     if !resolved_skin(cx).is_light {
         return Vec::new();
     }
+    let opacity = settings_surface_opacity(cx);
     [(0.06, 0.0, 0.0, 1.0), (0.08, 4.0, 12.0, 0.0)]
         .into_iter()
         .map(|(alpha, y, blur, spread)| gpui::BoxShadow {
-            color: hsla(220.0 / 360.0, 0.4, 0.14, alpha),
+            color: hsla(220.0 / 360.0, 0.4, 0.14, alpha * opacity),
             offset: point(px(0.0), px(y)),
             blur_radius: px(blur),
             spread_radius: px(spread),
@@ -555,7 +584,7 @@ pub(super) fn settings_card_shadow(cx: &App) -> Vec<gpui::BoxShadow> {
 
 pub(super) fn settings_canvas_tint(cx: &App) -> Hsla {
     if resolved_skin(cx).is_light {
-        hsla(220.0 / 360.0, 0.3, 0.2, 0.022)
+        hsla(220.0 / 360.0, 0.3, 0.2, 0.022 * settings_surface_opacity(cx))
     } else {
         gpui::transparent_black()
     }
@@ -759,7 +788,14 @@ pub(super) fn settings_card(element: gpui::Div, cx: &App) -> gpui::Div {
         border: gpui::white().opacity(0.10),
         sheen: GlassSurface::selection(ink(skin.accent)).sheen,
     };
-    element.rounded(px(12.0)).border_1().border_color(glass.border).bg(glass.background(0.009))
+    let opacity = settings_surface_opacity(cx);
+    let mut border = glass.border;
+    border.a *= opacity;
+    element
+        .rounded(px(12.0))
+        .border_1()
+        .border_color(border)
+        .bg(glass.background(0.009).opacity(opacity))
 }
 
 fn apply_skin_tokens(chrome: &ResolvedTheme, cx: &mut App) {

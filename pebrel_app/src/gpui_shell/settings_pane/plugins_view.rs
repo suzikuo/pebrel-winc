@@ -66,7 +66,7 @@ impl SettingsPane {
             .disabled(!idle)
             .on_click(cx.listener(|this, _, window, cx| this.pick_plugin_folder(window, cx)));
         let hero = design::settings_card(cx)
-            .bg(crate::gpui_shell::theme::settings_card_fill(cx).blend(theme.link.opacity(0.07)))
+            .bg(crate::gpui_shell::theme::settings_card_fill(cx, Some(theme.link.opacity(0.07))))
             .p_3()
             .child(h_flex().w_full().flex_wrap().gap_2().child(heading).child(install));
         let tabs = h_flex()

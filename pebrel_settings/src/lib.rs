@@ -1008,6 +1008,8 @@ pub struct RuntimeSettings {
     pub tray: bool,
     pub blur: BlurModeName,
     pub opacity: f32,
+    /// Let Settings navigation and cards follow the live window opacity.
+    pub settings_follow_opacity: bool,
     /// File-only overrides shared by sidebar and top tab layouts.
     pub tab_bar_material: TabBarMaterial,
     /// Whether the corresponding material value was explicitly present in
@@ -1217,6 +1219,7 @@ impl RuntimeSettings {
             tray: raw.bool_on("tray").unwrap_or(true),
             blur,
             opacity,
+            settings_follow_opacity: raw.bool_on("settings_follow_opacity").unwrap_or(false),
             tab_bar_material: TabBarMaterial::from_raw(raw),
             opacity_explicit,
             blur_explicit,

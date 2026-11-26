@@ -22,7 +22,7 @@
   "settings": {
     "opacity": {
       "title": "Deckkraft des Fensterhintergrunds",
-      "description": "Kleinere Werte machen Terminal und Einstellungen transparenter. Text bleibt deckend."
+      "description": "Kleinere Werte machen den Terminalhintergrund transparenter. Text bleibt deckend."
     },
     "sidebar": {
       "application": "Anwendung",

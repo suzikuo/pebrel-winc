@@ -315,7 +315,7 @@ pub(super) fn settings_card(cx: &App) -> gpui::Div {
     if cx.theme().is_dark() {
         crate::gpui_shell::theme::settings_card(card, cx)
     } else {
-        card.bg(crate::gpui_shell::theme::settings_card_fill(cx))
+        card.bg(crate::gpui_shell::theme::settings_card_fill(cx, None))
             .rounded(px(CARD_RADIUS))
             .shadow(crate::gpui_shell::theme::settings_card_shadow(cx))
     }
