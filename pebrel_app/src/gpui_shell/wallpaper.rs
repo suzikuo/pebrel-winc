@@ -286,7 +286,6 @@ fn show_load_error(error: image_loader::LoadError, cx: &mut App) {
 }
 
 /// 当前窗口透明度（无全局时视为不透明）。
-#[allow(dead_code)]
 pub fn window_opacity(cx: &App) -> f32 {
     cx.try_global::<VisualEffects>().map(|v| v.opacity).unwrap_or(1.0)
 }

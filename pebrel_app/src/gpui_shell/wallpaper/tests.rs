@@ -132,6 +132,39 @@ fn loading_yields_and_layout_opacity_refreshes_reuse_the_same_image(cx: &mut Tes
 }
 
 #[gpui::test]
+fn translucent_extended_wallpaper_keeps_settings_opaque_until_opt_in(cx: &mut TestAppContext) {
+    use crate::gpui_shell::{config::Settings, theme};
+    use pebrel_settings::ThemeName;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("settings-wallpaper.png");
+    fixture(&path, [86, 161, 177, 255]);
+    let mut runtime = settings(Some(path));
+    runtime.background_image_cover_chrome = true;
+    runtime.background_image_opacity = 0.45;
+    runtime.settings_follow_opacity = false;
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        cx.set_global(Settings::load_with_runtime(ThemeName::Nord, runtime.clone()));
+        update_wallpaper(&runtime, 1.0, BlurModeName::None, cx);
+        assert_eq!(theme::settings_window_bg(cx).a, 1.0, "while the image loads");
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(card_surface_opacity(cx), 0.78, "the extended terminal wallpaper is ready");
+        assert_eq!(theme::settings_window_bg(cx), theme::settings_panel_bg(cx));
+        set_opacity_live(0.5, cx);
+        assert_eq!(theme::settings_window_bg(cx).a, 1.0);
+        cx.global_mut::<Settings>().settings_follow_opacity = true;
+        for opacity in [0.5, 0.0, 1.0] {
+            set_opacity_live(opacity, cx);
+            assert_eq!(theme::settings_window_bg(cx).a, opacity);
+            assert_eq!(theme::settings_card_fill(cx, None).a, opacity);
+        }
+    });
+}
+
+#[gpui::test]
 fn latest_request_wins_and_clearing_during_decode_cannot_restore_an_image(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let first = directory.path().join("first.png");

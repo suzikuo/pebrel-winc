@@ -429,13 +429,24 @@ fn settings_follows_window_opacity(cx: &App) -> bool {
         .is_some_and(|settings| settings.settings_follow_opacity)
 }
 
-/// Settings surfaces share the live alpha in opt-in mode. The preference is cached.
+/// Settings surfaces use the slider's live alpha when the user opts in.
 fn settings_surface_opacity(cx: &App) -> f32 {
     if settings_follows_window_opacity(cx) {
-        crate::gpui_shell::wallpaper::card_surface_opacity(cx)
+        crate::gpui_shell::wallpaper::window_opacity(cx)
     } else {
         1.0
     }
+}
+
+/// The full Settings view paints this backing before the workspace wallpaper.
+pub(super) fn settings_window_bg(cx: &App) -> Hsla {
+    if crate::gpui_shell::wallpaper::native_underlay_active(cx) {
+        // AppKit video is already composited below the GPUI scene.
+        return gpui::transparent_black();
+    }
+    let mut background = settings_panel_bg(cx);
+    background.a *= settings_surface_opacity(cx);
+    background
 }
 
 pub(super) fn settings_readability_bg(cx: &App) -> Hsla {

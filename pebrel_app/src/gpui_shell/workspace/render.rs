@@ -102,9 +102,13 @@ impl Render for NebulaWorkspace {
             .flex()
             .flex_col()
             .relative()
-            // 旧壳每个像素只画一次：整窗先透明清屏，再分别画标题栏、侧栏、
-            // 卡外壳与卡底。根节点不能再铺一张半透明底。
-            .bg(gpui::transparent_black())
+            // Settings replaces the workspace card and needs its own backing below the wallpaper.
+            // Terminal layouts still start transparent and paint each chrome and card surface once.
+            .bg(if settings_active {
+                crate::gpui_shell::theme::settings_window_bg(cx)
+            } else {
+                gpui::transparent_black()
+            })
             .font(crate::gpui_shell::typography::ui_font(cx))
             .text_color(cx.theme().foreground)
             .can_drop({
