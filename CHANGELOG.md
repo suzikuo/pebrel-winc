@@ -18,6 +18,24 @@ Every release entry is provided in English and Simplified Chinese.
 
 - 终端目录导入支持 Niu（niubash 的 `niu.exe`）。导入后的 Niu 配置会出现在默认 Shell 下拉中，以 `--login -i` 启动。
 
+## 2.5.9 - 2026-11-26 (Pebrel Winc)
+
+### English
+
+#### Improved
+
+- Improved the floating Scratch Terminal panel so you can drag it by a session title or the space beside it. Click a title to switch sessions, or double-click to restore the default position and size.
+
+### 简体中文
+
+#### 改进
+
+- 浮动的临时命令行面板可按住会话标题或旁边的留白拖动。单击标题切换会话，双击恢复默认位置和大小。
+
+### Contributors
+
+- [suzikuo](https://github.com/suzikuo)
+
 ## 2.5.8 - 2026-11-26 (Pebrel Winc)
 
 ### English
