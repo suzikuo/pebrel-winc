@@ -110,6 +110,17 @@ struct Drag {
     size: Size<Pixels>,
     original: Frame,
     preview: Frame,
+    active: bool,
+    reset_on_click: bool,
+}
+
+impl Drag {
+    fn activate_at(&mut self, position: Point<Pixels>) -> bool {
+        let delta = position - self.start;
+        let threshold = px(super::super::TAB_DRAG_THRESHOLD);
+        self.active |= delta.x.abs() >= threshold || delta.y.abs() >= threshold;
+        self.active
+    }
 }
 
 #[derive(Default)]
@@ -123,7 +134,11 @@ impl NebulaWorkspace {
         Mode::from_placement(self.scratch.settings.placement)
     }
 
-    pub(in crate::gpui_shell::workspace) fn scratch_float_drag_active(&self) -> bool {
+    pub(in crate::gpui_shell::workspace) fn scratch_float_visible(&self) -> bool {
+        self.scratch_float_mode().is_some() && self.visible_scratch().is_some()
+    }
+
+    pub(in crate::gpui_shell::workspace) fn has_scratch_float_gesture(&self) -> bool {
         self.scratch.floating.drag.is_some()
     }
 
@@ -157,14 +172,19 @@ impl NebulaWorkspace {
     ) {
         let Some(drag) = &mut self.scratch.floating.drag else { return };
         if event.pressed_button == Some(MouseButton::Left) {
-            let frame =
-                drag.original.adjusted(drag.gesture, event.position - drag.start, drag.size);
-            if drag.preview != frame {
-                drag.preview = frame;
-                cx.notify();
+            let was_active = drag.active;
+            if drag.activate_at(event.position) {
+                let frame =
+                    drag.original.adjusted(drag.gesture, event.position - drag.start, drag.size);
+                if !was_active || drag.preview != frame {
+                    drag.preview = frame;
+                    cx.notify();
+                }
             }
         }
-        cx.stop_propagation();
+        if drag.active {
+            cx.stop_propagation();
+        }
     }
 
     pub(in crate::gpui_shell::workspace) fn finish_scratch_float_drag(
@@ -173,15 +193,22 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) -> bool {
         self.discard_stale_scratch_float_drag();
-        let Some(drag) = self.scratch.floating.drag.take() else { return false };
-        let frame = drag.original.adjusted(drag.gesture, position - drag.start, drag.size);
-        if frame != drag.original
-            && let Some(panel) = self.scratch.panels.get_mut(&drag.owner)
-        {
-            panel.frames[drag.mode as usize] = Some(frame);
+        let Some(mut drag) = self.scratch.floating.drag.take() else { return false };
+        let moved = drag.activate_at(position);
+        if let Some(panel) = self.scratch.panels.get_mut(&drag.owner) {
+            if moved {
+                let frame = drag.original.adjusted(drag.gesture, position - drag.start, drag.size);
+                if frame != drag.original {
+                    panel.frames[drag.mode as usize] = Some(frame);
+                }
+            } else if drag.reset_on_click {
+                panel.frames[drag.mode as usize] = None;
+            }
         }
-        cx.notify();
-        true
+        if moved || drag.reset_on_click {
+            cx.notify();
+        }
+        moved
     }
 
     fn start_scratch_float_drag(
@@ -199,26 +226,24 @@ impl NebulaWorkspace {
         if size.width <= px(0.) || size.height <= px(0.) {
             return;
         }
-        if gesture == Gesture::Move && event.click_count == 2 {
-            let owner = owner.clone();
-            if let Some(panel) = self.scratch.panels.get_mut(&owner) {
-                panel.frames[mode as usize] = None;
-            }
-        } else {
-            let original = self.scratch_float_frame(mode, panel);
-            self.scratch.floating.drag = Some(Drag {
-                owner: owner.clone(),
-                mode,
-                gesture,
-                start: event.position,
-                size,
-                original,
-                preview: original,
-            });
-        }
+        let active = gesture != Gesture::Move;
+        let original = self.scratch_float_frame(mode, panel);
+        self.scratch.floating.drag = Some(Drag {
+            owner: owner.clone(),
+            mode,
+            gesture,
+            start: event.position,
+            size,
+            original,
+            preview: original,
+            active,
+            reset_on_click: !active && event.click_count == 2,
+        });
         gpui_component::GlobalState::suppress_text_selection(cx);
-        cx.stop_propagation();
-        cx.notify();
+        if active {
+            cx.stop_propagation();
+            cx.notify();
+        }
     }
 
     fn scratch_float_frame(&self, mode: Mode, panel: &Panel) -> Frame {
@@ -274,25 +299,17 @@ impl NebulaWorkspace {
             .into_any_element()
     }
 
-    pub(super) fn scratch_float_grip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn scratch_float_title(
+        &self,
+        title: gpui::Stateful<gpui::Div>,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let text = crate::gpui_shell::config::ui_language(cx).text(Message::ScratchTerminalDrag);
-        let hover = cx.theme().muted;
-        div()
-            .id("scratch-terminal-drag")
-            .debug_selector(|| "scratch-terminal-drag".into())
+        title
+            .h_full()
             .aria_label(text)
             .tooltip(move |window, cx| Tooltip::new(text).build(window, cx))
-            .w(px(30.0))
-            .h_full()
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .justify_center()
-            .rounded_sm()
-            .text_color(cx.theme().muted_foreground)
-            .hover(move |grip| grip.bg(hover))
-            .cursor(CursorStyle::OpenHand)
-            .child(Icon::new(IconName::Ellipsis).size(px(16.0)))
+            .cursor_grab()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event, _, cx| {
@@ -302,7 +319,7 @@ impl NebulaWorkspace {
     }
 
     pub(in crate::gpui_shell::workspace) fn scratch_float_drag_overlay(&self) -> Option<gpui::Div> {
-        let drag = self.scratch.floating.drag.as_ref()?;
+        let drag = self.scratch.floating.drag.as_ref().filter(|drag| drag.active)?;
         Some(div().absolute().inset_0().occlude().cursor(drag.gesture.cursor()))
     }
 }
@@ -366,7 +383,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_corner_can_shrink_a_right_float_and_the_grip_can_move_it_to_an_edge() {
+    fn a_corner_can_shrink_a_right_float_and_the_title_can_move_it_to_an_edge() {
         let area = size(px(1000.), px(800.));
         let frame = Mode::Right.default_frame(0.5);
         let frame = frame.adjusted(
@@ -379,6 +396,25 @@ mod tests {
         assert_eq!(frame.left, 0.);
         assert_eq!(frame.bottom, 1.);
         assert!((frame.right - 0.3).abs() < 0.0001);
+    }
+
+    #[test]
+    fn a_title_click_stays_pending_but_a_drag_stays_active_after_returning_to_its_start() {
+        let original = Mode::Right.default_frame(0.5);
+        let mut drag = Drag {
+            owner: TabId("test-tab".into()),
+            mode: Mode::Right,
+            gesture: Gesture::Move,
+            start: gpui::point(px(20.), px(20.)),
+            size: size(px(1000.), px(800.)),
+            original,
+            preview: original,
+            active: false,
+            reset_on_click: false,
+        };
+        assert!(!drag.activate_at(gpui::point(px(23.), px(17.))));
+        assert!(drag.activate_at(gpui::point(px(20.), px(24.))));
+        assert!(drag.activate_at(drag.start));
     }
 
     #[test]

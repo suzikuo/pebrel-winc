@@ -1,6 +1,8 @@
 //! The workspace owns temporary terminal sessions independently of its split trees.
 
 mod floating;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod native_tests;
 
 use super::*;
 use crate::gpui_shell::widgets::{TOOLBAR_BUTTON_SIZE, toolbar_button};
@@ -418,8 +420,7 @@ impl NebulaWorkspace {
                     .flex_shrink_0()
                     .px_2()
                     .bg(cx.theme().title_bar)
-                    .when(mode.is_some(), |header| header.child(self.scratch_float_grip(cx)))
-                    .child(self.scratch_session_tabs(scratch, cx))
+                    .child(self.scratch_session_tabs(scratch, mode.is_some(), cx))
                     .child(
                         toolbar_button(
                             "scratch-terminal-add",
@@ -481,10 +482,16 @@ impl NebulaWorkspace {
                 .into_any_element()
         }
     }
-    fn scratch_session_tabs(&self, panel: &Panel, cx: &mut Context<Self>) -> impl IntoElement {
+    fn scratch_session_tabs(
+        &self,
+        panel: &Panel,
+        floating: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let language = crate::gpui_shell::config::ui_language(cx);
         div()
             .id("scratch-terminal-tabs")
+            .debug_selector(|| "scratch-terminal-tabs".into())
             .flex()
             .items_center()
             .flex_1()
@@ -492,14 +499,18 @@ impl NebulaWorkspace {
             .overflow_x_scroll()
             .track_scroll(&panel.scroll)
             .gap_1()
+            .when(floating, |title| self.scratch_float_title(title, cx))
             .children(panel.sessions.iter().enumerate().map(|(index, session)| {
                 let pane_id = session.pane.id;
-                let number = format!("{}", session.number);
-                let name = language.format(Message::ScratchTerminalSession, &[("number", &number)]);
+                let number = session.number;
+                let name = language
+                    .format(Message::ScratchTerminalSession, &[("number", &number.to_string())]);
                 Button::new(("scratch-session", pane_id as usize))
+                    .debug_selector(move || format!("scratch-terminal-session-{number}").into())
                     .small()
                     .ghost()
                     .selected(index == panel.selected)
+                    .when(floating, |tab| tab.cursor_grab())
                     .label(name)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_scratch_terminal(pane_id, window, cx);

@@ -124,7 +124,7 @@ impl NebulaWorkspace {
         self.tab_drag.is_some()
             || self.sidebar_resizing.is_some()
             || self.details_panel_resizing()
-            || self.scratch_float_drag_active()
+            || self.has_scratch_float_gesture()
     }
 
     /// 窗口级裸释放/移动监听（canvas 作为 paint 钩子注册 `Window::on_mouse_event`）：
@@ -140,22 +140,14 @@ impl NebulaWorkspace {
         gpui::canvas(
             |_, _, _| (),
             move |_, _, window, cx| {
-                let Some(workspace) = entity.upgrade() else { return };
-                if !workspace.read(cx).pointer_drag_active() {
-                    return;
-                }
-                let scratch_drag = workspace.read(cx).scratch_float_drag_active();
                 let moves = entity.clone();
                 window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, window, cx| {
                     if phase != gpui::DispatchPhase::Capture {
                         return;
                     }
-                    if scratch_drag {
-                        if let Some(workspace) = moves.upgrade() {
-                            workspace.update(cx, |this, cx| {
-                                this.move_scratch_float_drag(event, cx);
-                            });
-                        }
+                    let Some(workspace) = moves.upgrade() else { return };
+                    if workspace.read(cx).has_scratch_float_gesture() {
+                        workspace.update(cx, |this, cx| this.move_scratch_float_drag(event, cx));
                         return;
                     }
                     let viewport = window.viewport_size();
@@ -163,10 +155,9 @@ impl NebulaWorkspace {
                         || event.position.y < gpui::px(0.0)
                         || event.position.x > viewport.width
                         || event.position.y > viewport.height;
-                    if !outside {
+                    if !outside || !workspace.read(cx).pointer_drag_active() {
                         return;
                     }
-                    let Some(workspace) = moves.upgrade() else { return };
                     workspace.update(cx, |this, cx| {
                         this.update_left_sidebar_resize(event, window, cx);
                         this.update_details_panel_resize(event, window, cx);
@@ -181,6 +172,9 @@ impl NebulaWorkspace {
                         return;
                     }
                     let Some(workspace) = ups.upgrade() else { return };
+                    if !workspace.read(cx).pointer_drag_active() {
+                        return;
+                    }
                     workspace.update(cx, |this, cx| {
                         if this.finish_scratch_float_drag(event.position, cx) {
                             cx.stop_propagation();
