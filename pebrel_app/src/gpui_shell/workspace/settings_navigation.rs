@@ -47,7 +47,7 @@ impl NebulaWorkspace {
         }
         self.density = runtime.density;
         self.sidebar_spacing = runtime.sidebar_spacing;
-        self.reveal_active_tab();
+        self.scroll_to_active_tab();
         self.sync_settings_layout(tab_reveal_instant(cx));
         self.sidebar_resizing = None;
         self.reveal_if_tray_disabled(cx);

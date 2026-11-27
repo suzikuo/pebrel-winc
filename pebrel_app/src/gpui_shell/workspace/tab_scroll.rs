@@ -217,7 +217,12 @@ impl NebulaWorkspace {
     }
 
     pub(super) fn reveal_active_tab(&mut self) {
-        let active_row = self.reveal_sidebar_tab();
+        self.expand_active_tab_group();
+        self.scroll_to_active_tab();
+    }
+
+    pub(super) fn scroll_to_active_tab(&mut self) {
+        let active_row = self.active_sidebar_row();
         let layout = self.sidebar_row_layout();
         let window = self.tabs_window(&layout);
         self.tabs_scroll = if window.show == 0 {

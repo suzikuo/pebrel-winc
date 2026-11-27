@@ -104,6 +104,7 @@ impl TabGroups {
             cx.set_global(ProfileGroups::load());
         }
         let profile = cx.global::<ProfileGroups>().clone();
+        let collapsed = profile.groups.iter().map(|group| group.id).collect();
         let subscription = cx.observe_global::<ProfileGroups>(|this, cx| {
             this.tab_groups.profile = cx.global::<ProfileGroups>().clone();
             this.tab_groups
@@ -112,7 +113,7 @@ impl TabGroups {
             this.clamp_tabs_scroll();
             cx.notify();
         });
-        Self { profile, collapsed: HashSet::new(), _subscription: subscription }
+        Self { profile, collapsed, _subscription: subscription }
     }
 
     pub(super) fn accent(&self, index: usize, dark: bool) -> gpui::Hsla {
@@ -288,16 +289,27 @@ impl NebulaWorkspace {
         .collect()
     }
 
-    pub(super) fn reveal_sidebar_tab(&mut self) -> usize {
+    pub(super) fn expand_active_tab_group(&mut self) {
+        if let Some(id) = self.tab_group_at(self.active) {
+            self.tab_groups.collapsed.remove(&id);
+        }
+    }
+
+    pub(super) fn active_sidebar_row(&self) -> usize {
         if self.tab_groups.profile.groups.is_empty() {
             return self.active;
         }
-        if let Some(id) = self.tab_meta.get(self.active).and_then(|meta| meta.group_id) {
-            self.tab_groups.collapsed.remove(&id);
-        }
+        let collapsed_group =
+            self.tab_group_at(self.active).filter(|id| self.tab_groups.collapsed.contains(id));
         self.sidebar_rows()
             .iter()
-            .position(|row| matches!(row, SidebarRow::Tab(ix, _) if *ix == self.active))
+            .position(|row| match *row {
+                SidebarRow::Group(index) => {
+                    collapsed_group == Some(self.tab_groups.group_id(index))
+                },
+                SidebarRow::Tab(index, _) => index == self.active,
+                SidebarRow::Ungrouped => false,
+            })
             .unwrap_or(0)
     }
 
@@ -411,6 +423,7 @@ impl NebulaWorkspace {
         let radius = px(style.group_radius.map_or(GROUP_CORNER_RADIUS, f32::from));
         h_flex()
             .id(("tab-group", ix))
+            .debug_selector(move || format!("sidebar-tab-group-{ix}"))
             .w(px(width))
             .h(px(height))
             .items_center()
@@ -771,6 +784,100 @@ fn update_groups(groups: &mut Vec<Group>, edit: GroupEdit, name: &str) -> io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "gpui-test-support")]
+    #[gpui::test]
+    fn restored_sidebar_groups_start_collapsed_and_expand_on_click(cx: &mut gpui::TestAppContext) {
+        use crate::platform::profile_test_isolation;
+        use crate::session::{LaunchSession, Session, TabSession};
+
+        if profile_test_isolation::run_exact_child(
+            "gpui_shell::workspace::tab_groups::tests::restored_sidebar_groups_start_collapsed_and_expand_on_click",
+            None,
+        ) {
+            return;
+        }
+        pebrel_settings::persist_keys(&[
+            ("tabs_position", "sidebar".into()),
+            ("restore_session", "1".into()),
+        ])
+        .unwrap();
+        std::fs::write(groups_path(), r#"[{"id":1,"name":"A"},{"id":2,"name":"B"}]"#).unwrap();
+        let hub = crate::runtime_api::RuntimeHub::new();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(crate::gpui_shell::config::Settings::load(
+                pebrel_settings::ThemeName::Nord,
+            ));
+            crate::gpui_shell::math_view::register(cx);
+            crate::gpui_shell::file_editor::init(cx);
+            init(cx);
+            windowing::initialize(cx, hub.clone());
+        });
+        let directory = profile_test_isolation::root();
+        let launch = LaunchSession::Shell {
+            name: "Test shell".into(),
+            program: directory.join("missing-shell").display().to_string(),
+            args: vec![],
+        };
+        let tabs = [Some(1), Some(2), None]
+            .map(|group_id| TabSession {
+                cwd: directory.display().to_string(),
+                custom_name: None,
+                color: None,
+                group_id,
+                launch: Some(launch.clone()),
+                layout: None,
+                active_pane: 0,
+            })
+            .to_vec();
+        let mut session = Session::new(1, tabs);
+        session.clean_exit = true;
+        crate::session::save_to(&pebrel_settings::settings_dir().join("session.json"), &session)
+            .unwrap();
+        let mut workspace_out = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| {
+                let mut workspace = NebulaWorkspace::new(
+                    window,
+                    None,
+                    None,
+                    1,
+                    hub,
+                    windowing::WorkspaceStartup::RestoreOrDefault,
+                    windowing::WindowRole::Regular,
+                    cx,
+                );
+                assert_eq!(workspace.active, 1);
+                assert_eq!(workspace.tab_groups.collapsed, HashSet::from([1, 2]));
+                workspace
+            });
+            workspace_out = Some(workspace.clone());
+            Root::new(workspace, window, cx)
+        });
+        cx.simulate_resize(gpui::size(px(1280.0), px(900.0)));
+        let workspace = workspace_out.unwrap();
+        cx.run_until_parked();
+        workspace.update(cx, |workspace, cx| workspace.apply_runtime_settings(cx));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        assert!(cx.debug_bounds("sidebar-tab-group-0").is_some());
+        assert!(cx.debug_bounds("sidebar-tab-0").is_none());
+        assert!(cx.debug_bounds("sidebar-tab-1").is_none());
+        assert!(cx.debug_bounds("sidebar-tab-2").is_some());
+
+        let header = cx.debug_bounds("sidebar-tab-group-1").unwrap();
+        cx.simulate_click(header.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        assert!(cx.debug_bounds("sidebar-tab-1").is_some());
+        assert!(cx.debug_bounds("sidebar-tab-0").is_none());
+    }
 
     #[test]
     fn group_color_round_trips_and_old_profiles_default_to_automatic() {
