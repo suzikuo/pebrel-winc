@@ -170,7 +170,8 @@ impl NebulaWorkspace {
         let theme = cx.theme();
         let (ink, bg, border, hover, accent) =
             (theme.foreground, theme.popover, theme.border, theme.secondary, theme.primary);
-        let dragging = self.pane_drag.as_ref().is_some_and(|drag| drag.pane == id && drag.active);
+        let dragging =
+            self.pane_drag.as_ref().is_some_and(|drag| drag.source.pane_id == id && drag.active);
         let language = crate::gpui_shell::config::ui_language(cx);
         let name = pane
             .custom_name
@@ -298,7 +299,7 @@ impl NebulaWorkspace {
         let Some(tab) = self.tab_of_pane(id) else {
             return;
         };
-        self.pane_drag = None;
+        self.cancel_pane_drag(cx);
         self.focus_pane(tab, id, window, cx);
         let WorkspaceTab::Terminal { zoomed, .. } = &self.tabs[tab] else {
             return;

@@ -1,4 +1,5 @@
 use super::super::TabMeta;
+use super::drag::PaneDrop;
 use super::*;
 use crate::gpui_shell::terminal::view::TerminalLaunch;
 use gpui::{AppContext as _, Focusable as _, Modifiers, TestAppContext};
@@ -12,6 +13,28 @@ fn header_drag_exchanges_existing_views_and_escape_cancels(cx: &mut TestAppConte
 #[gpui::test]
 fn sidebar_grip_exchanges_existing_views_and_escape_cancels(cx: &mut TestAppContext) {
     exercise_drag(cx, pebrel_settings::TabsPositionName::Sidebar);
+}
+
+#[gpui::test]
+fn pane_header_detaches_to_a_tab_when_released_on_the_tab_bar(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let (workspace, mut window, [first, moved, last]) =
+        open_split_fixture(cx, pebrel_settings::TabsPositionName::Top, directory.path());
+    let selector = Box::leak(format!("pane-header-grip-{moved}").into_boxed_str());
+    let source = window.debug_bounds(selector).unwrap().center();
+    let target = window.debug_bounds("top-tab-0").unwrap().center();
+    let view = workspace.read_with(&window, |this, _| this.tabs[0].focused_view().unwrap().clone());
+    let plain = Modifiers::default();
+    window.simulate_mouse_down(source, MouseButton::Left, plain);
+    window.simulate_mouse_move(target, Some(MouseButton::Left), plain);
+    window.simulate_mouse_up(target, MouseButton::Left, plain);
+    workspace.read_with(&window, |this, _| {
+        let WorkspaceTab::Terminal { tree, .. } = &this.tabs[0] else { panic!() };
+        assert_eq!(tree.leaves(), [first, last]);
+        assert_eq!(this.active, 1);
+        assert_eq!(this.tabs[1].focused_view(), Some(&view));
+        assert_eq!(this.tabs.len(), 3);
+    });
 }
 
 #[gpui::test]
@@ -189,13 +212,13 @@ fn exercise_drag(cx: &mut TestAppContext, mode: pebrel_settings::TabsPositionNam
         let WorkspaceTab::Terminal { focused, .. } = &workspace.tabs[0] else { panic!() };
         assert_eq!(*focused, ids[0], "the actual source grip must receive the press");
         let drag = workspace.pane_drag.as_ref().expect("header press must arm the gesture");
-        assert_eq!(drag.pane, ids[0]);
+        assert_eq!(drag.source.pane_id, ids[0]);
         assert!(!drag.active, "the press alone must remain below the drag threshold");
     });
     window.simulate_mouse_move(target, Some(MouseButton::Left), Modifiers::default());
     workspace.read_with(&window, |workspace, _| {
         assert!(workspace.pane_drag.as_ref().is_some_and(|drag| drag.active));
-        assert_eq!(workspace.pane_drag.as_ref().unwrap().target, Some(ids[2]));
+        assert_eq!(workspace.pane_drag.as_ref().unwrap().target, PaneDrop::Swap(ids[2]));
     });
     window.simulate_keystrokes("ctrl-tab");
     workspace.read_with(&window, |workspace, _| {

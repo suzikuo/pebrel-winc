@@ -35,6 +35,13 @@ impl ResizeDrag {
 }
 
 impl NebulaWorkspace {
+    pub(super) fn cancel_pointer_gestures(&mut self, cx: &mut Context<Self>) -> bool {
+        self.cancel_details_panel_resize(cx)
+            | self.cancel_left_sidebar_resize(cx)
+            | self.cancel_pane_drag(cx)
+            | self.cancel_scratch_float_drag(cx)
+    }
+
     pub(super) fn subscribe_sidebar_resize_cancel(
         window: &Window,
         cx: &mut Context<Self>,
@@ -45,10 +52,7 @@ impl NebulaWorkspace {
             // must consume Escape first without taking the editor's focus.
             if window.window_handle() == owner_window
                 && event.keystroke.key == "escape"
-                && (view.cancel_details_panel_resize(cx)
-                    | view.cancel_left_sidebar_resize(cx)
-                    | view.cancel_pane_drag(cx)
-                    | view.cancel_scratch_float_drag(cx))
+                && view.cancel_pointer_gestures(cx)
             {
                 cx.stop_propagation();
             }

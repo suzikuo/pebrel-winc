@@ -55,6 +55,139 @@ pub(super) fn open_test_window(cx: &mut App, count: usize) -> (u64, Entity<Nebul
     (id, workspace)
 }
 
+fn open_split_test_window(cx: &mut App) -> (u64, Entity<NebulaWorkspace>, [u64; 2]) {
+    let (id, workspace) = open_test_window(cx, 2);
+    let ids = workspace.update(cx, |workspace, _| {
+        let (WorkspaceTab::Terminal { panes: mut second, focused: moved, .. }, _) =
+            workspace.remove_tab_at(1).unwrap()
+        else {
+            panic!("expected a terminal tab");
+        };
+        let WorkspaceTab::Terminal { panes, tree, focused, broadcast, .. } = &mut workspace.tabs[0]
+        else {
+            panic!("expected a terminal tab");
+        };
+        assert!(tree.split_leaf(*focused, moved, pebrel_split::SplitDirection::LeftRight, 0.5));
+        panes.append(&mut second);
+        *broadcast = true;
+        [*focused, moved]
+    });
+    (id, workspace, ids)
+}
+
+fn pane_view(
+    workspace: &NebulaWorkspace,
+    pane: u64,
+) -> Option<Entity<crate::gpui_shell::terminal::view::TerminalView>> {
+    let WorkspaceTab::Terminal { panes, .. } = workspace.tabs.get(workspace.tab_of_pane(pane)?)?
+    else {
+        return None;
+    };
+    panes.iter().find(|candidate| candidate.id == pane).map(|pane| pane.view.clone())
+}
+
+#[gpui::test]
+fn pane_drop_revalidates_destination_then_moves_only_the_requested_view(cx: &mut TestAppContext) {
+    initialize_test(cx);
+    cx.update(|cx| {
+        let (_, source, [survivor, pane]) = open_split_test_window(cx);
+        let (window_id, target) = open_test_window(cx, 2);
+        let payload =
+            source.update(cx, |source, cx| source.cross_window_pane_payload(0, pane, cx)).unwrap();
+        let moved_view = pane_view(source.read(cx), pane).unwrap();
+        let anchor = target.read(cx).active_terminal_pane_id().unwrap();
+        let destination = CrossWindowDropDestination {
+            window_id,
+            dock: Some(DockTarget { pane: Some(anchor), nav: pebrel_split::SplitNav::Up }),
+            pane_dock_tab: Some(target.read(cx).tab_meta[0].runtime_id.clone()),
+        };
+        let closed_destination =
+            CrossWindowDropDestination { window_id: u64::MAX, ..destination.clone() };
+        assert!(!drop_terminal_to_existing_window(payload.clone(), closed_destination, cx));
+        target.update(cx, |target, _| target.active = 1);
+        assert!(!drop_terminal_to_existing_window(payload.clone(), destination.clone(), cx));
+        assert_eq!(pane_view(source.read(cx), pane).unwrap(), moved_view);
+
+        target.update(cx, |target, _| target.active = 0);
+        assert!(drop_terminal_to_existing_window(payload, destination, cx));
+        let WorkspaceTab::Terminal { tree, focused, broadcast, .. } = &source.read(cx).tabs[0]
+        else {
+            panic!("expected remaining terminal");
+        };
+        assert_eq!(tree.leaves(), [survivor]);
+        assert_eq!(*focused, survivor);
+        assert!(!broadcast);
+        let WorkspaceTab::Terminal { tree, focused, .. } = &target.read(cx).tabs[0] else {
+            panic!("expected receiving terminal");
+        };
+        assert!(matches!(
+            tree,
+            SplitTree::Split { direction: pebrel_split::SplitDirection::TopBottom, .. }
+        ));
+        assert_eq!(tree.leaves(), [pane, anchor]);
+        assert_eq!(*focused, pane);
+        assert_eq!(pane_view(target.read(cx), pane).unwrap(), moved_view);
+        assert_eq!(target.read(cx).tabs.len(), 2);
+    });
+}
+
+#[gpui::test]
+fn pane_header_releases_outside_window_with_no_intermediate_frame(cx: &mut TestAppContext) {
+    exercise_pane_tear_out(cx, false);
+}
+
+#[gpui::test]
+fn pane_header_alt_tear_out_survives_non_client_move(cx: &mut TestAppContext) {
+    exercise_pane_tear_out(cx, true);
+}
+
+fn exercise_pane_tear_out(cx: &mut TestAppContext, with_alt: bool) {
+    use gpui::{Modifiers, MouseButton, VisualTestContext, point};
+
+    initialize_test(cx);
+    let (source_id, source, [survivor, pane]) = cx.update(open_split_test_window);
+    let (handle, moved_view) = cx.update(|cx| {
+        source.update(cx, |source, cx| {
+            source.tabs_position = pebrel_settings::TabsPositionName::Top;
+            cx.notify();
+        });
+        (entry_by_id(source_id, cx).unwrap().handle, pane_view(source.read(cx), pane).unwrap())
+    });
+    let mut visual = VisualTestContext::from_window(handle, cx);
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    let selector = Box::leak(format!("pane-header-grip-{pane}").into_boxed_str());
+    let start = visual.debug_bounds(selector).expect("split pane grip must render").center();
+    let plain = Modifiers::default();
+    visual.simulate_mouse_down(start, MouseButton::Left, plain);
+    let destination = if with_alt {
+        let alt = Modifiers { alt: true, ..plain };
+        let moved = start + point(px(0.0), px(16.0));
+        visual.simulate_mouse_move(moved, Some(MouseButton::Left), alt);
+        visual.simulate_mouse_move(moved, None::<MouseButton>, plain);
+        moved
+    } else {
+        point(px(-50.0), start.y)
+    };
+    visual.simulate_mouse_up(destination, MouseButton::Left, plain);
+    drop(visual);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(pane_view(source.read(cx), survivor).is_some());
+        assert!(source.read(cx).tab_of_pane(pane).is_none());
+        let target = cx
+            .global::<WindowRegistry>()
+            .entries
+            .iter()
+            .find(|entry| entry.runtime_window_id != source_id)
+            .expect("releasing should open a new window for the pane")
+            .workspace
+            .upgrade()
+            .unwrap();
+        assert_eq!(target.read(cx).tabs[0].focused_view().unwrap(), &moved_view);
+        assert_eq!(combined_session(None, cx).unwrap().tabs.len(), 2);
+    });
+}
+
 #[gpui::test]
 fn moving_last_tab_closes_only_source_after_transfer(cx: &mut TestAppContext) {
     initialize_test(cx);

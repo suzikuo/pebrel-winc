@@ -115,15 +115,15 @@ impl Render for NebulaWorkspace {
                 let runtime_window_id = self.runtime_window_id;
                 move |value, _, _| {
                     value
-                        .downcast_ref::<windowing::CrossWindowTabDrag>()
+                        .downcast_ref::<windowing::CrossWindowTerminalDrag>()
                         .is_some_and(|payload| {
                             payload.source_window_id() != runtime_window_id
                         })
                 }
             })
-            .on_drag_move::<windowing::CrossWindowTabDrag>(cx.listener(
+            .on_drag_move::<windowing::CrossWindowTerminalDrag>(cx.listener(
                 |this,
-                 event: &gpui::DragMoveEvent<windowing::CrossWindowTabDrag>,
+                 event: &gpui::DragMoveEvent<windowing::CrossWindowTerminalDrag>,
                  _window,
                  cx| {
                     let payload = event.drag(cx);
@@ -138,9 +138,9 @@ impl Render for NebulaWorkspace {
                 },
             ))
             .on_drop(cx.listener(
-                |this, payload: &windowing::CrossWindowTabDrag, window, cx| {
+                |this, payload: &windowing::CrossWindowTerminalDrag, window, cx| {
                     let dock = this.cross_window_dock.take();
-                    if this.accept_cross_window_tab(payload, dock, window, cx) {
+                    if this.accept_terminal_transfer(payload, dock, window, cx) {
                         cx.stop_propagation();
                     }
                 },
@@ -456,7 +456,7 @@ impl Render for NebulaWorkspace {
             .children(self.render_details_panel_resize_overlay(cx))
             .children(self.tabs_scrollbar_drag_overlay(cx))
             .child(self.pane_drag_capture(cx))
-            .children(self.pane_drag_overlay(cx))
+            .children(self.pane_drag_overlay(window, cx))
             .children(self.split_drag_visual(cx))
             .children(self.render_left_sidebar_resize_overlay(cx))
             .children(self.scratch_float_drag_overlay())

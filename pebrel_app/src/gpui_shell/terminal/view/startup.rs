@@ -343,34 +343,8 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         let cursor_window_active = window.is_window_active();
         let cursor_pane_focused = focus_handle.is_focused(window);
-        let cursor_blink_subscriptions = [
-            cx.observe_window_activation(window, |view, window, cx| {
-                let active = window.is_window_active();
-                if !active {
-                    view.shell_pointer.invalidate();
-                    view.cancel_pointer_gesture();
-                }
-                if view.cursor_window_active != active {
-                    view.cursor_window_active = active;
-                    view.restart_cursor_blink(cx);
-                }
-            }),
-            cx.on_focus_in(&focus_handle, window, |view, _window, cx| {
-                if !view.cursor_pane_focused {
-                    view.cursor_pane_focused = true;
-                    view.restart_cursor_blink(cx);
-                }
-            }),
-            cx.on_focus_out(&focus_handle, window, |view, _event, _window, cx| {
-                view.shell_pointer.invalidate();
-                view.cancel_pointer_gesture();
-                view.path_drop.invalidate();
-                if view.cursor_pane_focused {
-                    view.cursor_pane_focused = false;
-                    view.restart_cursor_blink(cx);
-                }
-            }),
-        ];
+        let cursor_blink_subscriptions =
+            Self::subscribe_cursor_to_window(&focus_handle, window, cx);
 
         let mut view = Self {
             _history_subscription: cx
@@ -531,6 +505,58 @@ impl TerminalView {
         view.refresh_ssh_label();
         view.restart_cursor_blink(cx);
         view
+    }
+
+    pub(in crate::gpui_shell) fn rebind_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self._cursor_blink_subscriptions =
+            Self::subscribe_cursor_to_window(&self.focus_handle, window, cx);
+        self.cursor_window_active = window.is_window_active();
+        self.cursor_pane_focused = self.focus_handle.is_focused(window);
+        self.cancel_pointer_gesture();
+        self.shell_pointer.invalidate();
+        self.path_drop.invalidate();
+        // The effect actor owns render resources and subscriptions of the old window.
+        self.effect.take();
+        self.restart_cursor_blink(cx);
+    }
+
+    fn subscribe_cursor_to_window(
+        focus_handle: &FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> [gpui::Subscription; 3] {
+        [
+            cx.observe_window_activation(window, |view, window, cx| {
+                let active = window.is_window_active();
+                if !active {
+                    view.shell_pointer.invalidate();
+                    view.cancel_pointer_gesture();
+                }
+                if view.cursor_window_active != active {
+                    view.cursor_window_active = active;
+                    view.restart_cursor_blink(cx);
+                }
+            }),
+            cx.on_focus_in(focus_handle, window, |view, _window, cx| {
+                if !view.cursor_pane_focused {
+                    view.cursor_pane_focused = true;
+                    view.restart_cursor_blink(cx);
+                }
+            }),
+            cx.on_focus_out(focus_handle, window, |view, _event, _window, cx| {
+                view.shell_pointer.invalidate();
+                view.cancel_pointer_gesture();
+                view.path_drop.invalidate();
+                if view.cursor_pane_focused {
+                    view.cursor_pane_focused = false;
+                    view.restart_cursor_blink(cx);
+                }
+            }),
+        ]
     }
 }
 

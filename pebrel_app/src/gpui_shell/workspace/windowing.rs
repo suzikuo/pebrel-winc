@@ -7,8 +7,10 @@
 mod shutdown;
 pub(crate) use shutdown::{quit_all, quit_for_update, schedule_update};
 mod startup;
+mod terminal_transfer;
 pub(crate) use startup::open_initial_window;
 use startup::{initial_startup, runtime_window_startup};
+pub(crate) use terminal_transfer::{drop_terminal_to_existing_window, move_terminal_to_new_window};
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod linux_native_tests;
 pub(super) mod startup_geometry;
@@ -226,26 +228,53 @@ impl Global for WindowRegistry {}
 /// GPUI 原生 drag payload 由整个 App 共享。这里只携带稳定 pane id 和源实体，
 /// 不把 `WorkspaceTab` 本体塞进 payload；真正的活体所有权只在 drop 事务中移动。
 #[derive(Clone)]
-pub(crate) struct CrossWindowTabDrag {
+pub(crate) struct CrossWindowTerminalDrag {
     source: WeakEntity<NebulaWorkspace>,
     source_window_id: u64,
-    pane_id: u64,
+    pub(super) pane_id: u64,
+    // A pane drag belongs to the original tab for as long as it is still split.
+    pane_source_tab: Option<crate::runtime_api::tabs::TabId>,
 }
 
-impl CrossWindowTabDrag {
+impl CrossWindowTerminalDrag {
     pub(crate) fn source_window_id(&self) -> u64 {
         self.source_window_id
     }
 
     pub(super) fn source_tab_index(&self, workspace: &NebulaWorkspace) -> Option<usize> {
-        workspace.tab_of_pane(self.pane_id)
+        let ix = workspace.tab_of_pane(self.pane_id)?;
+        if let Some(tab_id) = self.pane_source_tab.as_ref()
+            && (&workspace.tab_meta.get(ix)?.runtime_id != tab_id
+                || !matches!(workspace.tabs.get(ix), Some(WorkspaceTab::Terminal { panes, .. }) if panes.len() > 1))
+        {
+            return None;
+        }
+        Some(ix)
+    }
+
+    fn report_failed_pane_move(&self, cx: &mut App) {
+        if self.pane_source_tab.is_none() {
+            return;
+        }
+        if let Some(entry) = entry_by_id(self.source_window_id, cx) {
+            let _ = entry.handle.update(cx, |_, window, cx| {
+                let language = crate::gpui_shell::config::ui_language(cx);
+                crate::gpui_shell::toast::toast(
+                    window,
+                    cx,
+                    crate::display::ToastKind::Warning,
+                    language.text(crate::i18n::Message::WorkspacePaneMoveFailed),
+                );
+            });
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossWindowDropDestination {
     pub(crate) window_id: u64,
     pub(crate) dock: Option<DockTarget>,
+    pane_dock_tab: Option<crate::runtime_api::tabs::TabId>,
 }
 
 #[cfg(windows)]
@@ -676,7 +705,7 @@ pub(crate) fn clear_cross_window_drag_target(target_window_id: Option<u64>, cx: 
 
 #[cfg(windows)]
 pub(crate) fn update_cross_window_drag_target(
-    payload: &CrossWindowTabDrag,
+    payload: &CrossWindowTerminalDrag,
     previous_target: Option<u64>,
     cx: &mut App,
 ) -> Option<CrossWindowDropDestination> {
@@ -697,21 +726,30 @@ pub(crate) fn update_cross_window_drag_target(
                 workspace.cross_window_dock = dock;
                 cx.notify();
             }
-            dock
+            let pane_dock_tab = if dock.is_some() && payload.pane_source_tab.is_some() {
+                workspace.tab_meta.get(workspace.active).map(|meta| meta.runtime_id.clone())
+            } else {
+                None
+            };
+            CrossWindowDropDestination { window_id: target_window_id, dock, pane_dock_tab }
         })
     });
     match result {
-        Ok(Ok(dock)) => Some(CrossWindowDropDestination { window_id: target_window_id, dock }),
+        Ok(Ok(destination)) => Some(destination),
         _ => {
             clear_cross_window_drag_target(Some(target_window_id), cx);
-            None
+            payload.pane_source_tab.as_ref().map(|_| CrossWindowDropDestination {
+                window_id: target_window_id,
+                dock: None,
+                pane_dock_tab: None,
+            })
         },
     }
 }
 
 #[cfg(not(windows))]
 pub(crate) fn update_cross_window_drag_target(
-    _payload: &CrossWindowTabDrag,
+    _payload: &CrossWindowTerminalDrag,
     previous_target: Option<u64>,
     cx: &mut App,
 ) -> Option<CrossWindowDropDestination> {
@@ -1404,58 +1442,6 @@ pub(super) fn save_current_window_session(
     cx.global_mut::<WindowRegistry>().session_persistence.save(session, reason)
 }
 
-pub(crate) fn move_tab_to_new_window(payload: CrossWindowTabDrag, cx: &mut App) {
-    let opened =
-        open_workspace_window(cx, WorkspaceStartup::Empty, None, None, true, WindowRole::Regular);
-    let Ok((target_window_id, target_workspace)) = opened else {
-        log::warn!("failed to open a window for moved tab");
-        return;
-    };
-    let Some(entry) = entry_by_id(target_window_id, cx) else { return };
-    let target = target_workspace.downgrade();
-    let result = entry.handle.update(cx, move |_, window, cx| {
-        target.update(cx, |workspace, cx| {
-            workspace.accept_cross_window_tab(&payload, None, window, cx)
-        })
-    });
-    if !matches!(result, Ok(Ok(true))) {
-        unregister(target_window_id, cx);
-        let _ = entry.handle.update(cx, |_, window, _| window.remove_window());
-    }
-}
-
-/// 把 mouse-up 时确认的跨窗目标作为一次延迟事务提交。目标窗口可能在释放
-/// 与 defer 执行之间关闭；必须先重新取得它的 handle/workspace，成功进入
-/// 目标窗口上下文后才允许 `accept_cross_window_tab` detach 源 tab。
-pub(crate) fn drop_tab_to_existing_window(
-    payload: CrossWindowTabDrag,
-    destination: CrossWindowDropDestination,
-    cx: &mut App,
-) -> bool {
-    let Some(entry) = entry_by_id(destination.window_id, cx) else {
-        log::debug!(
-            "cross-window tab drop cancelled: target window {} closed before commit",
-            destination.window_id
-        );
-        return false;
-    };
-    let target = entry.workspace.clone();
-    let result = entry.handle.update(cx, move |_, window, cx| {
-        target.update(cx, |workspace, cx| {
-            workspace.accept_cross_window_tab(&payload, destination.dock, window, cx)
-        })
-    });
-    if matches!(result, Ok(Ok(true))) {
-        true
-    } else {
-        log::debug!(
-            "cross-window tab drop cancelled: target window {} became unavailable",
-            destination.window_id
-        );
-        false
-    }
-}
-
 fn unregister(runtime_window_id: u64, cx: &mut App) {
     let registry = cx.global_mut::<WindowRegistry>();
     registry.entries.retain(|entry| entry.runtime_window_id != runtime_window_id);
@@ -1511,168 +1497,6 @@ pub(crate) fn close_empty_workspace_window(
 }
 
 impl NebulaWorkspace {
-    pub(crate) fn cross_window_drag_payload(
-        &self,
-        ix: usize,
-        cx: &Context<Self>,
-    ) -> Option<CrossWindowTabDrag> {
-        let WorkspaceTab::Terminal { focused, .. } = self.tabs.get(ix)? else { return None };
-        Some(CrossWindowTabDrag {
-            source: cx.entity().downgrade(),
-            source_window_id: self.runtime_window_id,
-            pane_id: *focused,
-        })
-    }
-
-    pub(crate) fn cross_window_drag_preview(
-        _payload: &CrossWindowTabDrag,
-        cx: &mut App,
-    ) -> Entity<TabDragPreview> {
-        cx.new(|_| TabDragPreview)
-    }
-
-    pub(crate) fn schedule_move_tab_to_new_window(&self, ix: usize, cx: &mut Context<Self>) {
-        let Some(payload) = self.cross_window_drag_payload(ix, cx) else { return };
-        cx.defer(move |cx| move_tab_to_new_window(payload, cx));
-    }
-
-    pub(crate) fn accept_cross_window_tab(
-        &mut self,
-        payload: &CrossWindowTabDrag,
-        dock: Option<DockTarget>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if payload.source_window_id == self.runtime_window_id {
-            return false;
-        }
-        let detached = match payload
-            .source
-            .update(cx, |source, _| source.detach_terminal_tab(payload.pane_id))
-        {
-            Ok(Some(detached)) => detached,
-            _ => return false,
-        };
-
-        let pane_ids = detached.pane_ids.clone();
-        let source_window_id = detached.source_window_id;
-        let source_handle = detached.source_handle;
-        let source_became_empty = detached.source_became_empty;
-        let mut tab = detached.tab;
-        if let WorkspaceTab::Terminal { panes, .. } = &mut tab {
-            for pane in panes {
-                pane._subscription = cx.subscribe_in(&pane.view, window, Self::on_terminal_event);
-            }
-        }
-        self.runtime_hub.move_panes_to_window(source_window_id, self.runtime_window_id, &pane_ids);
-        self.attach_terminal_tab(tab, detached.meta, dock, window, cx);
-
-        let source = payload.source.clone();
-        if source_became_empty {
-            unregister(source_window_id, cx);
-            let _ = source_handle.update(cx, |_, source_window, _| source_window.remove_window());
-        } else {
-            let _ = source_handle.update(cx, move |_, source_window, cx| {
-                let _ = source.update(cx, |source, cx| {
-                    if source.tabs.is_empty() && source.settings_tab_open {
-                        source.open_settings(source_window, cx);
-                    }
-                    source.reveal_active_tab();
-                    source.focus_active(source_window, cx);
-                    source.sync_side_panel_to_active(true, cx);
-                    cx.notify();
-                });
-            });
-        }
-        publish_runtime_snapshot_with_current(
-            self.window_hidden,
-            self.runtime_window_snapshot(window, cx).1,
-            cx,
-        );
-        true
-    }
-
-    fn detach_terminal_tab(&mut self, pane_id: u64) -> Option<DetachedTerminalTab> {
-        let ix = self.tab_of_pane(pane_id)?;
-        let (tab, meta) = self.remove_tab_at(ix)?;
-        let WorkspaceTab::Terminal { panes, .. } = &tab else {
-            self.insert_tab_at(ix, tab, meta);
-            return None;
-        };
-        let pane_ids = panes.iter().map(|pane| pane.id).collect::<Vec<_>>();
-        for pane_id in &pane_ids {
-            self.pane_bounds.borrow_mut().remove(pane_id);
-        }
-        self.split_bounds.borrow_mut().clear();
-        self.tab_drag = None;
-        self.tab_menu = None;
-        self.tab_rename = None;
-        if ix < self.active {
-            self.active -= 1;
-        }
-        if !self.tabs.is_empty() {
-            self.active = self.active.min(self.tabs.len() - 1);
-        }
-        let source_became_empty = self.tabs.is_empty() && !self.settings_tab_open;
-        Some(DetachedTerminalTab {
-            tab,
-            meta,
-            pane_ids,
-            source_window_id: self.runtime_window_id,
-            source_handle: self.window_handle,
-            source_became_empty,
-        })
-    }
-
-    fn attach_terminal_tab(
-        &mut self,
-        tab: WorkspaceTab,
-        meta: TabMeta,
-        dock: Option<DockTarget>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let can_dock = dock.is_some_and(|target| matches!(self.tabs.get(self.active), Some(WorkspaceTab::Terminal { tree, .. }) if target.pane.is_none_or(|pane| tree.contains(pane))));
-        if can_dock {
-            let Some(target) = dock else { unreachable!("can_dock requires a direction") };
-            let WorkspaceTab::Terminal {
-                panes: source_panes,
-                tree: source_tree,
-                focused: source_focused,
-                ..
-            } = tab
-            else {
-                unreachable!("cross-window drag payloads only contain terminal tabs")
-            };
-            let Some(WorkspaceTab::Terminal { panes, tree, focused, zoomed, broadcast, .. }) =
-                self.tabs.get_mut(self.active)
-            else {
-                unreachable!("can_dock checked the active terminal tab")
-            };
-            if let Some(pane) = target.pane {
-                tree.dock_at_leaf(pane, source_tree, target.nav)
-                    .expect("destination checked above");
-            } else {
-                let previous = std::mem::replace(tree, SplitTree::leaf(source_focused));
-                *tree = previous.joined(source_tree, target.nav);
-            }
-            panes.extend(source_panes);
-            *focused = source_focused;
-            *zoomed = false;
-            // 跨窗 dock 改变了 tab 的接收集合，不能继承任一侧的广播开关。
-            *broadcast = false;
-        } else {
-            let at = self.tabs.len();
-            self.insert_tab_at(at, tab, meta);
-            self.active = at;
-        }
-        self.cross_window_dock = None;
-        self.reveal_active_tab();
-        self.focus_active(window, cx);
-        self.sync_side_panel_to_active(true, cx);
-        cx.notify();
-    }
-
     pub(crate) fn active_terminal_pane_id(&self) -> Option<u64> {
         match self.tabs.get(self.active) {
             Some(WorkspaceTab::Terminal { focused, .. }) => Some(*focused),

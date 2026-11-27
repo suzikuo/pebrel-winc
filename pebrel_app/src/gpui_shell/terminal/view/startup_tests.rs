@@ -15,6 +15,26 @@ impl Render for Surface {
     }
 }
 
+#[gpui::test]
+fn cursor_observes_focus_after_moving_to_another_window(cx: &mut TestAppContext) {
+    let (view, source, _receiver) = open(cx);
+    source.update(|window, _| window.remove_window());
+    let (_, target) = cx.add_window_view(|window, cx| {
+        view.update(cx, |view, cx| view.rebind_window(window, cx));
+        let focus = view.read(cx).focus_handle.clone();
+        Root::new(cx.new(|_| Surface { focus }), window, cx)
+    });
+    target.update(|window, _| window.activate_window());
+    target.run_until_parked();
+    target.update(|window, cx| {
+        let focus = view.read(cx).focus_handle.clone();
+        window.focus(&focus, cx);
+        window.draw(cx).clear(cx);
+    });
+    target.run_until_parked();
+    view.update(target, |view, _| assert!(view.cursor_pane_focused));
+}
+
 impl TerminalView {
     // 工作区级按键回归复用同一个终端夹具，避免另造一套输入/会话状态。
     pub(crate) fn install_completion_test_session(&mut self) -> Receiver<Msg> {

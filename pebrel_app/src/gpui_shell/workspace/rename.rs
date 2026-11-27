@@ -198,7 +198,7 @@ impl NebulaWorkspace {
         // Drop subscriptions before changing focus, so an old Blur cannot cancel the new editor.
         self.tab_rename = None;
         self.pane_rename = None;
-        self.pane_drag = None;
+        self.cancel_pane_drag(cx);
         // An empty value means automatic naming; show the live title as a placeholder.
         // Merely opening and leaving the editor must not freeze a directory/program name.
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(automatic_title));

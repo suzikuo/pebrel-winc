@@ -8,7 +8,7 @@ use pebrel_split::{SplitNav, SplitTree};
 
 use super::{
     NebulaWorkspace, TAB_DRAG_THRESHOLD, WorkspaceTab,
-    windowing::{self, CrossWindowDropDestination, CrossWindowTabDrag},
+    windowing::{self, CrossWindowDropDestination, CrossWindowTerminalDrag},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub(super) struct TabDrag {
     pub(super) source: usize,
     /// 手势开始时冻结的 terminal pane 身份。跨窗提交不能在 mouse-up 时再按
     /// source 下标猜，因为拖拽期间其它 tab 可能被关闭或重排。
-    pub(super) cross_window: Option<CrossWindowTabDrag>,
+    pub(super) cross_window: Option<CrossWindowTerminalDrag>,
     pub(super) cross_window_target: Option<u64>,
     pub(super) press_x: f32,
     pub(super) press_y: f32,
@@ -103,17 +103,12 @@ impl NebulaWorkspace {
             // source workspace 仍在当前 mouse-up 回调里借用。延迟到事件结束后再
             // 进入目标窗口，避免 accept 回头 update 源 entity 时发生重入借用。
             cx.defer(move |cx| {
-                windowing::drop_tab_to_existing_window(payload, destination, cx);
+                windowing::drop_terminal_to_existing_window(payload, destination, cx);
             });
             cx.notify();
             return true;
         }
-        let viewport = window.viewport_size();
-        let outside = position.x < px(0.0)
-            || position.y < px(0.0)
-            || position.x > viewport.width
-            || position.y > viewport.height;
-        if active && outside && self.tear_out_active_tab_drag(cx) {
+        if active && outside_window(position, window) && self.tear_out_active_tab_drag(cx) {
             return true;
         }
         self.release_tab_drag(window, cx);
@@ -150,12 +145,9 @@ impl NebulaWorkspace {
                         workspace.update(cx, |this, cx| this.move_scratch_float_drag(event, cx));
                         return;
                     }
-                    let viewport = window.viewport_size();
-                    let outside = event.position.x < gpui::px(0.0)
-                        || event.position.y < gpui::px(0.0)
-                        || event.position.x > viewport.width
-                        || event.position.y > viewport.height;
-                    if !outside || !workspace.read(cx).pointer_drag_active() {
+                    if !outside_window(event.position, window)
+                        || !workspace.read(cx).pointer_drag_active()
+                    {
                         return;
                     }
                     workspace.update(cx, |this, cx| {
@@ -206,7 +198,7 @@ impl NebulaWorkspace {
         };
         windowing::clear_cross_window_drag_target(drag.cross_window_target, cx);
         if let Some(payload) = drag.cross_window {
-            cx.defer(move |cx| windowing::move_tab_to_new_window(payload, cx));
+            cx.defer(move |cx| windowing::move_terminal_to_new_window(payload, cx));
         } else {
             self.schedule_move_tab_to_new_window(drag.source, cx);
         }
@@ -308,7 +300,7 @@ impl NebulaWorkspace {
             })?;
         let destination = windowing::update_cross_window_drag_target(&payload, previous_target, cx);
         if let Some(drag) = self.tab_drag.as_mut() {
-            drag.cross_window_target = destination.map(|target| target.window_id);
+            drag.cross_window_target = destination.as_ref().map(|target| target.window_id);
         }
         destination
     }
@@ -441,8 +433,18 @@ impl NebulaWorkspace {
     }
 
     pub(crate) fn dock_nav_at(&self, x: f32, y: f32) -> Option<DockTarget> {
+        if self.settings_open {
+            return None;
+        }
         let areas = self.dock_pane_areas();
         dock_target_at(self.active_terminal_area()?, &areas, x, y)
+    }
+
+    pub(super) fn can_dock_terminal_at(&self, target: DockTarget) -> bool {
+        !self.settings_open
+            && matches!(self.tabs.get(self.active),
+            Some(WorkspaceTab::Terminal { tree, zoomed, .. })
+                if (!zoomed || tree.is_leaf()) && target.pane.is_none_or(|pane| tree.contains(pane)))
     }
 
     /// Pane exchange targets a visible leaf, including its header at the outer rim.
@@ -485,7 +487,7 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.dock_allowed(source) || !self.tabs.get(self.active).is_some_and(|tab| matches!(tab, WorkspaceTab::Terminal { tree, .. } if target.pane.is_none_or(|pane| tree.contains(pane)))) {
+        if !self.dock_allowed(source) || !self.can_dock_terminal_at(target) {
             return;
         }
         let Some((
@@ -518,6 +520,7 @@ impl NebulaWorkspace {
         // 两个原本独立的 tab 合并后，旧广播范围已经失真；显式关闭，避免
         // 用户下一次击键意外扩散到刚并入的 pane。
         *broadcast = false;
+        self.mark_structural_resize(self.active, cx);
         self.focus_active(window, cx);
         cx.notify();
     }
@@ -549,6 +552,14 @@ impl NebulaWorkspace {
         self.focus_active(window, cx);
         cx.notify();
     }
+}
+
+pub(super) fn outside_window(position: Point<Pixels>, window: &Window) -> bool {
+    let viewport = window.viewport_size();
+    position.x < px(0.0)
+        || position.y < px(0.0)
+        || position.x >= viewport.width
+        || position.y >= viewport.height
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

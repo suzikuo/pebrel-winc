@@ -871,9 +871,7 @@ impl NebulaWorkspace {
                 if active {
                     workspace.refresh_workspace_plugins(cx);
                 } else {
-                    workspace.cancel_details_panel_resize(cx);
-                    workspace.cancel_left_sidebar_resize(cx);
-                    workspace.cancel_scratch_float_drag(cx);
+                    workspace.cancel_pointer_gestures(cx);
                 }
                 if workspace.spinner_window_active != active {
                     workspace.spinner_window_active = active;

@@ -1744,7 +1744,10 @@
       "close": "Close this pane",
       "swap_release": "Release to exchange pane positions",
       "extract_release": "Release to extract as a new tab",
-      "extract_drag_hint": "Drag outside the terminal to extract",
+      "extract_drag_hint": "Drag out of the terminal to detach, or hold Alt for a new window",
+      "window_release": "Release to move into a new window",
+      "dock_release": "Release to split the target terminal",
+      "move_failed": "Could not move the pane. Check the destination and try again.",
       "broadcast_enabled": "Broadcasting input to {count} panes in this tab",
       "restore_layout": "Restore pane layout (Ctrl+Shift+Enter)",
       "zoom": "Zoom this pane (Ctrl+Shift+Enter)"

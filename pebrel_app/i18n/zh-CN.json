@@ -1744,7 +1744,10 @@
       "close": "关闭此分栏",
       "swap_release": "松开以交换分屏位置",
       "extract_release": "松手：拉出为独立标签",
-      "extract_drag_hint": "拖到终端区外可拉出",
+      "extract_drag_hint": "拖出终端区可拆成标签，按住 Alt 可拆成窗口",
+      "window_release": "松手：移到新窗口",
+      "dock_release": "松手：并入目标终端的分屏",
+      "move_failed": "分屏移动失败，请确认目标后重试。",
       "broadcast_enabled": "广播输入已开启：键入将同步到本标签的 {count} 个分栏",
       "restore_layout": "还原分栏布局 (Ctrl+Shift+Enter)",
       "zoom": "独占放大此分栏 (Ctrl+Shift+Enter)"
