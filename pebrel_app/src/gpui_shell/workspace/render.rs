@@ -43,8 +43,9 @@ impl Render for NebulaWorkspace {
         } else {
             match self.tabs.get(self.active) {
                 Some(WorkspaceTab::Terminal { .. }) => {
-                    let terminal = self.render_terminal_tab(self.active, cx);
-                    Some(self.render_with_scratch(terminal, cx))
+                    let scratch_focused = self.focused_scratch_view(window, cx).is_some();
+                    let terminal = self.render_terminal_tab(self.active, !scratch_focused, cx);
+                    Some(self.render_with_scratch(terminal, scratch_focused, cx))
                 },
                 Some(WorkspaceTab::Settings { view, .. }) => {
                     Some(gpui::IntoElement::into_any_element(view.clone()))

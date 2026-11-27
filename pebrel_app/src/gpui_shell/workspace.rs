@@ -1404,12 +1404,15 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let scratch_focused = self.focused_scratch_view(window, cx).is_some();
         {
             let Some(WorkspaceTab::Terminal { panes, focused, .. }) = self.tabs.get_mut(tab_ix)
             else {
                 return;
             };
-            if *focused == pane_id || !panes.iter().any(|pane| pane.id == pane_id) {
+            if (*focused == pane_id && !scratch_focused)
+                || !panes.iter().any(|pane| pane.id == pane_id)
+            {
                 return;
             }
             *focused = pane_id;
@@ -1938,7 +1941,12 @@ impl NebulaWorkspace {
 
     /// Terminal tab 的内容区：单叶直渲、缩放态聚焦 pane 满卡，否则按
     /// 分屏树递归铺陈。
-    fn render_terminal_tab(&self, tab_ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_terminal_tab(
+        &self,
+        tab_ix: usize,
+        active_focus: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let Some(WorkspaceTab::Terminal { tree, panes, focused, zoomed, broadcast }) =
             self.tabs.get(tab_ix)
         else {
@@ -1957,7 +1965,7 @@ impl NebulaWorkspace {
                 pane,
                 ordinal,
                 pane_header::header_visible(panes.len()),
-                true,
+                active_focus,
                 *zoomed,
                 *broadcast,
                 pane_header::HeaderCorners { top_left: true, top_right: true },
@@ -1971,7 +1979,7 @@ impl NebulaWorkspace {
             tree,
             &mut path,
             panes,
-            *focused,
+            active_focus.then_some(*focused),
             &order,
             *broadcast,
             pane_header::HeaderCorners { top_left: true, top_right: true },
@@ -1998,7 +2006,7 @@ impl NebulaWorkspace {
         node: &SplitTree<u64>,
         path: &mut Vec<bool>,
         panes: &[TerminalPane],
-        focused: u64,
+        focused: Option<u64>,
         order: &[u64],
         broadcast: bool,
         corners: pane_header::HeaderCorners,
@@ -2015,7 +2023,7 @@ impl NebulaWorkspace {
                     pane,
                     ordinal,
                     true,
-                    *id == focused,
+                    focused == Some(*id),
                     false,
                     broadcast,
                     corners,

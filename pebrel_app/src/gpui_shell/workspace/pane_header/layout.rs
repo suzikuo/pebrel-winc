@@ -48,6 +48,24 @@ impl PaneBounds {
 }
 
 impl NebulaWorkspace {
+    pub(in crate::gpui_shell::workspace) fn inactive_pane_veil(
+        &self,
+        cx: &App,
+    ) -> Option<gpui::Hsla> {
+        let enabled = cx
+            .try_global::<crate::gpui_shell::config::Settings>()
+            .is_none_or(|settings| settings.dim_inactive_panes);
+        if !enabled {
+            return None;
+        }
+        Some(if self.tabs_position == pebrel_settings::TabsPositionName::Sidebar {
+            // Fade content toward its own background, including in light themes.
+            crate::gpui_shell::theme::card_content_bg(cx).opacity(0.2)
+        } else {
+            gpui::black().opacity(crate::display::NEBULA_UNFOCUSED_SPLIT_DIM)
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::gpui_shell::workspace) fn render_terminal_pane(
         &self,
@@ -65,16 +83,7 @@ impl NebulaWorkspace {
         let id = pane.id;
         let group: SharedString = format!("terminal-pane-{id}").into();
         let store = self.pane_bounds.clone();
-        let dim = !focused
-            && cx
-                .try_global::<crate::gpui_shell::config::Settings>()
-                .is_none_or(|settings| settings.dim_inactive_panes);
-        let veil = if sidebar {
-            // Fade content toward its own background, including in light themes.
-            crate::gpui_shell::theme::card_content_bg(cx).opacity(0.2)
-        } else {
-            gpui::black().opacity(crate::display::NEBULA_UNFOCUSED_SPLIT_DIM)
-        };
+        let veil = (!focused).then(|| self.inactive_pane_veil(cx)).flatten();
         let mut body = div()
             .id(("pane-body", id as usize))
             .debug_selector(move || format!("pane-body-{id}"))
@@ -83,7 +92,15 @@ impl NebulaWorkspace {
             .min_h_0()
             .relative()
             .child(terminal_activity::terminal_surface(pane))
-            .when(dim, |body| body.child(div().absolute().inset_0().bg(veil)));
+            .when_some(veil, |body, veil| {
+                body.child(
+                    div()
+                        .debug_selector(move || format!("pane-dim-veil-{id}"))
+                        .absolute()
+                        .inset_0()
+                        .bg(veil),
+                )
+            });
         if sidebar && multiple {
             // Overlays never reserve a terminal row, including while hovered or zoomed.
             // The active pane stays identifiable even when dimming is disabled.

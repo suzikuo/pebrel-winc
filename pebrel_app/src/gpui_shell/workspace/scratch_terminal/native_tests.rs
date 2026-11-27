@@ -50,6 +50,37 @@ fn floating_title_distinguishes_session_clicks_from_panel_drags(cx: &mut TestApp
     workspace.read_with(&window, |view, _| assert!(view.visible_scratch().is_none()));
 }
 
+#[gpui::test]
+fn dim_veil_tracks_focus_between_main_and_scratch_terminal(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let (workspace, mut window) = open_floating_panel(cx, directory.path());
+    let main_id = workspace.read_with(&window, |view, _| {
+        view.tabs[0].primary_terminal_pane().unwrap().id
+    });
+    assert_eq!(main_id, 1);
+
+    // Initial focus is on the main terminal, so the scratch surface is dimmed.
+    redraw(&mut window);
+    assert!(window.debug_bounds("pane-dim-veil-1").is_none());
+    assert!(window.debug_bounds("scratch-terminal-dim-veil").is_some());
+
+    // Clicking the scratch terminal moves focus and swaps the inactive veil.
+    let scratch_body = window.debug_bounds("scratch-terminal-dim-veil").unwrap().center();
+    window.simulate_click(scratch_body, Modifiers::default());
+    window.run_until_parked();
+    redraw(&mut window);
+    assert!(window.debug_bounds("pane-dim-veil-1").is_some());
+    assert!(window.debug_bounds("scratch-terminal-dim-veil").is_none());
+
+    // Clicking back on the main terminal restores focus to the main pane.
+    let main_top = window.debug_bounds("pane-body-1").unwrap().origin + point(px(24.), px(24.));
+    window.simulate_click(main_top, Modifiers::default());
+    window.run_until_parked();
+    redraw(&mut window);
+    assert!(window.debug_bounds("pane-dim-veil-1").is_none());
+    assert!(window.debug_bounds("scratch-terminal-dim-veil").is_some());
+}
+
 fn redraw(window: &mut VisualTestContext) {
     window.update(|window, cx| {
         window.refresh();
@@ -112,7 +143,8 @@ fn open_floating_panel(
             let owner = view.scratch_owner().unwrap().clone();
             let mut panel = Panel::default();
             for _ in 0..2 {
-                panel.push(view.new_pane((80, 24), launch(), None, window, cx));
+                let pane = view.new_pane((80, 24), launch(), None, window, cx);
+                panel.push(pane, window, cx);
             }
             view.scratch.panels.insert(owner, panel);
             view.focus_active(window, cx);

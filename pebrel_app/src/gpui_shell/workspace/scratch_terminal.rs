@@ -20,6 +20,7 @@ gpui::actions!(scratch_terminal, [ToggleScratchTerminal, HideScratchTerminal]);
 struct Session {
     pane: TerminalPane,
     number: u64,
+    _focus_subscriptions: [gpui::Subscription; 2],
 }
 
 #[derive(Default)]
@@ -37,10 +38,24 @@ impl Panel {
         self.sessions.get(self.selected).map(|session| &session.pane)
     }
 
-    fn push(&mut self, pane: TerminalPane) {
+    fn push(
+        &mut self,
+        pane: TerminalPane,
+        window: &mut Window,
+        cx: &mut Context<NebulaWorkspace>,
+    ) {
+        let focus = pane.view.read(cx).focus_handle(cx);
+        let focus_subscriptions = [
+            cx.on_focus_in(&focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus_out(&focus, window, |_, _, _, cx| cx.notify()),
+        ];
         self.next_number += 1;
         self.selected = self.sessions.len();
-        self.sessions.push(Session { pane, number: self.next_number });
+        self.sessions.push(Session {
+            pane,
+            number: self.next_number,
+            _focus_subscriptions: focus_subscriptions,
+        });
         self.scroll.scroll_to_item(self.selected);
         self.visible = true;
     }
@@ -194,7 +209,7 @@ impl NebulaWorkspace {
         let pane = self.new_pane(grid, launch, None, window, cx);
         pane.view.update(cx, |view, cx| view.use_scratch_font_size(cx));
         focus_view(&pane.view, window, cx);
-        self.scratch.panels.entry(id).or_default().push(pane);
+        self.scratch.panels.entry(id).or_default().push(pane, window, cx);
         cx.notify();
     }
 
@@ -393,6 +408,7 @@ impl NebulaWorkspace {
     pub(super) fn render_with_scratch(
         &self,
         content: gpui::AnyElement,
+        scratch_focused: bool,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let Some(scratch) = self.visible_scratch() else { return content };
@@ -400,6 +416,7 @@ impl NebulaWorkspace {
         let language = crate::gpui_shell::config::ui_language(cx);
         let mode = floating::Mode::from_placement(self.scratch.settings.placement);
         let ratio = relative(f32::from(self.scratch.settings.size) / 100.0);
+        let veil = (!scratch_focused).then(|| self.inactive_pane_veil(cx)).flatten();
         let panel = div()
             .id("scratch-terminal-panel")
             .debug_selector(|| "scratch-terminal-panel".into())
@@ -410,7 +427,7 @@ impl NebulaWorkspace {
             .overflow_hidden()
             .occlude()
             .bg(cx.theme().background)
-            .border_color(cx.theme().border)
+            .border_color(if scratch_focused { cx.theme().primary } else { cx.theme().border })
             .child(
                 div()
                     .flex()
@@ -468,7 +485,21 @@ impl NebulaWorkspace {
                     }),
             )
             .child(
-                div().flex_1().min_h_0().w_full().child(terminal_activity::terminal_surface(pane)),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .relative()
+                    .child(terminal_activity::terminal_surface(pane))
+                    .when_some(veil, |body, veil| {
+                        body.child(
+                            div()
+                                .debug_selector(|| "scratch-terminal-dim-veil".into())
+                                .absolute()
+                                .inset_0()
+                                .bg(veil),
+                        )
+                    }),
             );
         if let Some(mode) = mode {
             self.render_scratch_float(mode, scratch, content, panel, cx)
